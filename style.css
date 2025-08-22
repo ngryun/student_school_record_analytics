@@ -1617,12 +1617,6 @@ header p {
         margin-bottom: 8px;
         padding: 10px;
     }
-    /* 학급 전체 인쇄: 개별 학생과 동일한 레이아웃 사용 */
-    #students-tab.only-class-print .student-print-page {
-        page-break-after: always;
-        margin-bottom: 0;
-        background: white;
-    }
     
     /* 별도 프린트 헤더는 사용하지 않음 */
     .print-header {

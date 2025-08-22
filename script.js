@@ -35,7 +35,6 @@ class ScoreAnalyzer {
         const showStudentDetail = document.getElementById('showStudentDetail');
         const tableViewBtn = document.getElementById('tableViewBtn');
         const detailViewBtn = document.getElementById('detailViewBtn');
-        const printClassBtn = document.getElementById('printClassBtn');
         const pdfClassBtn = document.getElementById('pdfClassBtn');
         const uploadSection = document.querySelector('.upload-section');
         const fileLabel = document.querySelector('.file-input-label');
@@ -143,9 +142,6 @@ class ScoreAnalyzer {
             this.switchView('detail');
         });
 
-        if (printClassBtn) {
-            printClassBtn.addEventListener('click', () => this.printSelectedClass());
-        }
         if (pdfClassBtn) {
             pdfClassBtn.addEventListener('click', () => this.generateSelectedClassPDF());
         }
@@ -2262,7 +2258,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
-    // 다중 생성용 차트 (저장하지 않고 즉시 렌더)
+    // 다중 생성용 차트 (개별 PDF와 동일한 설정)
     createStudentPercentileChartFor(canvas, student) {
         if (!canvas) return null;
         const subjects = this.combinedData.subjects.filter(subject => {
@@ -2289,137 +2285,74 @@ document.addEventListener('DOMContentLoaded', () => {
                     pointBackgroundColor: 'rgba(52, 152, 219, 1)',
                     pointBorderColor: '#fff',
                     pointBorderWidth: 2,
-                    pointRadius: 4
+                    pointRadius: 6
                 }]
             },
             options: {
-                responsive: false,
+                responsive: true,
                 maintainAspectRatio: true,
-                plugins: { legend: { display: false }, tooltip: { enabled: false }, datalabels: { display: true, formatter: (v, ctx) => {
-                    const idx = ctx.dataIndex;
-                    const g = subjects[idx] ? student.grades[subjects[idx].name] : 'N/A';
-                    return `${g}등급`;
-                }, color: '#2c3e50', backgroundColor: 'rgba(255,255,255,0.8)', borderColor: '#dee2e6', borderWidth: 1, borderRadius: 4, font: { size: 10 } } },
-                scales: { r: { beginAtZero: true, max: 5, min: 0, ticks: { stepSize: 1, callback: (val)=> (val===0?'':`${6-val}등급`) } } }
+                interaction: {
+                    intersect: false
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        enabled: false
+                    },
+                    datalabels: {
+                        display: true,
+                        formatter: function(value, context) {
+                            const subjectIndex = context.dataIndex;
+                            const subject = subjects[subjectIndex];
+                            const grade = student.grades[subject.name];
+                            return `${grade}등급`;
+                        },
+                        color: '#2c3e50',
+                        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                        borderColor: '#dee2e6',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        padding: 4,
+                        font: {
+                            size: 11,
+                            weight: '500'
+                        }
+                    }
+                },
+                scales: {
+                    r: {
+                        beginAtZero: true,
+                        max: 5,
+                        min: 0,
+                        ticks: {
+                            stepSize: 1,
+                            color: '#5a6c7d',
+                            callback: function(value) {
+                                if (value === 0) return '';
+                                return `${6 - value}등급`;
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        angleLines: {
+                            color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        pointLabels: {
+                            font: {
+                                size: 12,
+                                weight: '500'
+                            },
+                            color: '#2c3e50'
+                        }
+                    }
+                }
             }
         });
     }
 
-    // 학급 전체 인쇄
-    async printSelectedClass() {
-        try {
-            const gradeSelect = document.getElementById('gradeSelect');
-            const classSelect = document.getElementById('classSelect');
-            const grade = gradeSelect.value;
-            const cls = classSelect.value;
-            
-            if (!grade || !cls) {
-                alert('학년과 반을 선택해 주세요.');
-                return;
-            }
-            
-            const students = this.combinedData.students.filter(s => 
-                String(s.grade) === String(grade) && String(s.class) === String(cls)
-            );
-            
-            if (students.length === 0) {
-                alert('선택한 학급의 학생이 없습니다.');
-                return;
-            }
-
-            // 기존 인쇄 영역 정리
-            let container = document.getElementById('classPrintArea');
-            if (container) {
-                container.remove();
-            }
-            
-            // 새 출력 영역 구성
-            container = document.createElement('div');
-            container.id = 'classPrintArea';
-            container.className = 'class-print-area';
-            document.getElementById('students-tab').appendChild(container);
-
-            // 학생별 페이지 HTML 생성
-            const charts = [];
-            students.forEach((student, idx) => {
-                const canvasId = `classRadar-${student.grade}-${student.class}-${student.number}-${idx}`;
-                container.insertAdjacentHTML('beforeend', this.buildStudentDetailHTMLForPrint(student, canvasId));
-            });
-
-            // DOM 렌더링 대기 (더 충분한 시간 확보)
-            await new Promise(resolve => setTimeout(resolve, 200));
-
-            // 차트 생성
-            for (let idx = 0; idx < students.length; idx++) {
-                const student = students[idx];
-                const canvasId = `classRadar-${student.grade}-${student.class}-${student.number}-${idx}`;
-                const canvas = document.getElementById(canvasId);
-                
-                if (canvas) {
-                    try {
-                        const chart = this.createStudentPercentileChartFor(canvas, student);
-                        if (chart) {
-                            charts.push(chart);
-                        }
-                    } catch (chartError) {
-                        console.warn(`차트 생성 실패 (학생: ${student.name}):`, chartError);
-                    }
-                }
-            }
-
-            // 차트 렌더링 완료 대기
-            await new Promise(resolve => setTimeout(resolve, 300));
-
-            // 인쇄 타깃 설정
-            const studentsTab = document.getElementById('students-tab');
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('print-target'));
-            studentsTab.classList.add('print-target', 'only-class-print');
-
-            // 스케일링 적용
-            const pages = document.querySelectorAll('.class-print-area .student-print-page');
-            pages.forEach(page => page.classList.add('apply-print-scale'));
-            document.documentElement.style.setProperty('--page-scale', '0.85');
-
-            // 인쇄 실행
-            window.print();
-
-            // 인쇄 완료 후 정리
-            const cleanup = () => {
-                try {
-                    // 차트 파괴
-                    charts.forEach(chart => {
-                        try {
-                            if (chart && typeof chart.destroy === 'function') {
-                                chart.destroy();
-                            }
-                        } catch (e) {
-                            console.warn('차트 파괴 중 오류:', e);
-                        }
-                    });
-                    
-                    // 클래스 및 스타일 정리
-                    studentsTab.classList.remove('only-class-print', 'print-target');
-                    document.documentElement.style.removeProperty('--page-scale');
-                    
-                    // 스케일 클래스 제거
-                    pages.forEach(page => page.classList.remove('apply-print-scale'));
-                    
-                } catch (cleanupError) {
-                    console.warn('정리 중 오류:', cleanupError);
-                }
-            };
-
-            // afterprint 이벤트로 정리
-            window.addEventListener('afterprint', cleanup, { once: true });
-            
-            // 백업 타이머 (이벤트가 발생하지 않을 경우)
-            setTimeout(cleanup, 2000);
-
-        } catch (err) {
-            console.error('학급 전체 인쇄 오류:', err);
-            alert('학급 전체 인쇄 중 오류가 발생했습니다: ' + err.message);
-        }
-    }
 
     // 학급 전체 PDF
     async generateSelectedClassPDF() {
