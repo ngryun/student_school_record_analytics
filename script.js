@@ -2343,23 +2343,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 학급 전체 PDF
     async generateSelectedClassPDF() {
+        // 필요 변수는 try 외부에 선언하여 예외 처리에서 접근 가능하도록 함
+        const gradeSelect = document.getElementById('gradeSelect');
+        const classSelect = document.getElementById('classSelect');
+        const grade = gradeSelect.value;
+        const cls = classSelect.value;
+        let students = [];
         try {
-            const gradeSelect = document.getElementById('gradeSelect');
-            const classSelect = document.getElementById('classSelect');
-            const grade = gradeSelect.value;
-            const cls = classSelect.value;
             if (!grade || !cls) {
                 alert('학년과 반을 선택해 주세요.');
                 return;
             }
-            const students = this.combinedData.students.filter(s => String(s.grade) === String(grade) && String(s.class) === String(cls));
+            students = this.combinedData.students.filter(s => String(s.grade) === String(grade) && String(s.class) === String(cls));
             if (students.length === 0) {
                 alert('선택한 학급의 학생이 없습니다.');
                 return;
             }
 
             const { jsPDF } = window.jspdf;
-            const pdf = new jsPDF('p', 'mm', 'a4');
+            // 메모리 사용을 줄이기 위해 압축 활성화
+            const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true });
             const pdfWidth = 210, pdfHeight = 297;
             const maxImgWidth = pdfWidth - 20; // 10mm 여백
             const maxImgHeight = pdfHeight - 20; // 상하 10mm 여백
@@ -2378,12 +2381,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 차트 렌더
                 await new Promise(r => setTimeout(r, 10));
                 const canvas = document.getElementById(canvasId);
-                if (canvas) this.createStudentPercentileChartFor(canvas, student);
+                const chartInstance = canvas ? this.createStudentPercentileChartFor(canvas, student) : null;
                 await new Promise(r => setTimeout(r, 50));
 
                 const element = temp.firstElementChild;
-                const canvasImg = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true, allowTaint: true });
-                const imgData = canvasImg.toDataURL('image/png');
+                // 캔버스 스케일을 낮추고 JPEG로 변환하여 용량 축소
+                const canvasImg = await html2canvas(element, { scale: 1.3, backgroundColor: '#ffffff', useCORS: true, allowTaint: true });
+                const imgData = canvasImg.toDataURL('image/jpeg', 0.82);
                 const aspect = canvasImg.width / canvasImg.height;
                 let drawWidth = maxImgWidth;
                 let drawHeight = drawWidth / aspect;
@@ -2392,7 +2396,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const y = (pdfHeight - drawHeight) / 2;
 
                 if (i > 0) pdf.addPage();
-                pdf.addImage(imgData, 'PNG', x, y, drawWidth, drawHeight);
+                pdf.addImage(imgData, 'JPEG', x, y, drawWidth, drawHeight);
+
+                // 차트 메모리 해제
+                if (chartInstance && typeof chartInstance.destroy === 'function') {
+                    try { chartInstance.destroy(); } catch (_) {}
+                }
             }
 
             document.body.removeChild(temp);
@@ -2400,7 +2409,65 @@ document.addEventListener('DOMContentLoaded', () => {
             pdf.save(fileName);
         } catch (err) {
             console.error('학급 전체 PDF 생성 오류:', err);
-            alert('학급 전체 PDF 생성 중 오류가 발생했습니다: ' + err.message);
+            // 문자열 길이 초과 등으로 실패하는 경우, 파일을 여러 개로 나눠 저장을 시도
+            const isLenErr = err && (err.name === 'RangeError' || String(err.message || '').includes('Invalid string length'));
+            if (isLenErr && students && students.length > 0) {
+                try {
+                    const chunkSize = 12; // 용량 방지를 위한 페이지 분할 크기
+                    const totalParts = Math.ceil(students.length / chunkSize);
+                    for (let part = 0; part < totalParts; part++) {
+                        const start = part * chunkSize;
+                        const end = Math.min(students.length, start + chunkSize);
+                        const { jsPDF } = window.jspdf;
+                        const partPdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true });
+                        const pdfWidth = 210, pdfHeight = 297;
+                        const maxImgWidth = pdfWidth - 20;
+                        const maxImgHeight = pdfHeight - 20;
+
+                        const temp = document.createElement('div');
+                        temp.style.position = 'fixed';
+                        temp.style.left = '-10000px';
+                        temp.style.top = '0';
+                        document.body.appendChild(temp);
+
+                        for (let i = start; i < end; i++) {
+                            const student = students[i];
+                            const canvasId = `pdfRadar-${student.grade}-${student.class}-${student.number}-${i}`;
+                            temp.innerHTML = this.buildStudentDetailHTMLForPrint(student, canvasId);
+                            await new Promise(r => setTimeout(r, 10));
+                            const canvas = document.getElementById(canvasId);
+                            const chartInstance = canvas ? this.createStudentPercentileChartFor(canvas, student) : null;
+                            await new Promise(r => setTimeout(r, 50));
+
+                            const element = temp.firstElementChild;
+                            const canvasImg = await html2canvas(element, { scale: 1.3, backgroundColor: '#ffffff', useCORS: true, allowTaint: true });
+                            const imgData = canvasImg.toDataURL('image/jpeg', 0.82);
+                            const aspect = canvasImg.width / canvasImg.height;
+                            let drawWidth = maxImgWidth;
+                            let drawHeight = drawWidth / aspect;
+                            if (drawHeight > maxImgHeight) { drawHeight = maxImgHeight; drawWidth = drawHeight * aspect; }
+                            const x = (pdfWidth - drawWidth) / 2;
+                            const y = (pdfHeight - drawHeight) / 2;
+
+                            if (i > start) partPdf.addPage();
+                            partPdf.addImage(imgData, 'JPEG', x, y, drawWidth, drawHeight);
+
+                            if (chartInstance && typeof chartInstance.destroy === 'function') {
+                                try { chartInstance.destroy(); } catch (_) {}
+                            }
+                        }
+
+                        document.body.removeChild(temp);
+                        const partName = `${grade}학년_${cls}반_학생성적_${new Date().toISOString().split('T')[0]}_part${part + 1}-of-${totalParts}.pdf`;
+                        partPdf.save(partName);
+                    }
+                    alert('PDF가 용량 문제로 여러 개의 파일로 분할 저장되었습니다.');
+                    return;
+                } catch (fallbackErr) {
+                    console.error('분할 저장 시도 중 오류:', fallbackErr);
+                }
+            }
+            alert('학급 전체 PDF 생성 중 오류가 발생했습니다: ' + (err && err.message ? err.message : String(err)));
         }
     }
 
