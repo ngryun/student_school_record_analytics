@@ -765,15 +765,17 @@ class ScoreAnalyzer {
         <header>
             <h1>성적 분석 결과 (배포용)</h1>
             <p>업로드 없이 저장된 분석 결과를 표시합니다</p>
-            <div style="margin-top: 15px; font-size: 0.9rem; opacity: 0.8;">
-                Made by NAMGUNG YEON (Seolak high school)<br>
-                <a href="https://namgungyeon.tistory.com/133" target="_blank" rel="noopener">https://namgungyeon.tistory.com/133</a>
-            </div>
         </header>
         <div class="upload-section" style="display:none;"></div>
         ${document.getElementById('results') ? document.getElementById('results').outerHTML : '<div id="results" class="results-section"></div>'}
         <div id="loading" class="loading" style="display:none;"></div>
         <div id="error" class="error-message" style="display:none;"></div>
+        <footer class="app-footer">
+            <div class="credits">
+                Made by NAMGUNG YEON (Seolak high school) · 
+                <a href="https://namgungyeon.tistory.com/133" target="_blank" rel="noopener" title="https://namgungyeon.tistory.com/133">블로그</a>
+            </div>
+        </footer>
     </div>
 
     <script>
@@ -985,6 +987,26 @@ header h1 {
     border-radius: 8px;
     padding: 20px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 하단 크레딧 푸터 (fallback) */
+.app-footer {
+    padding: 12px 40px 24px 40px;
+}
+.app-footer .credits {
+    text-align: right;
+    font-size: 0.85rem;
+    color: #6c757d;
+    opacity: 0.85;
+}
+.app-footer .credits a {
+    color: #6c757d;
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(108,117,125,0.5);
+}
+.app-footer .credits a:hover {
+    color: #495057;
+    border-bottom-color: rgba(73,80,87,0.7);
 }
 `;
     }
