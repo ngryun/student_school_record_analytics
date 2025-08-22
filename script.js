@@ -771,9 +771,9 @@ class ScoreAnalyzer {
         <div id="loading" class="loading" style="display:none;"></div>
         <div id="error" class="error-message" style="display:none;"></div>
         <footer class="app-footer">
-            <div class="credits">
-                Made by NAMGUNG YEON (Seolak high school) · 
-                <a href="https://namgungyeon.tistory.com/133" target="_blank" rel="noopener" title="https://namgungyeon.tistory.com/133">블로그</a>
+            <div class="footer-right">
+                <div class="credits">Made by NAMGUNG YEON (Seolak high school)</div>
+                <a class="help-btn" href="https://namgungyeon.tistory.com/133" target="_blank" rel="noopener" title="도움말 보기">❔ 도움말</a>
             </div>
         </footer>
     </div>
@@ -992,21 +992,48 @@ header h1 {
 /* 하단 크레딧 푸터 (fallback) */
 .app-footer {
     padding: 12px 40px 24px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+.app-footer .footer-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 .app-footer .credits {
     text-align: right;
     font-size: 0.85rem;
-    color: #adb5bd; /* 더 밝은 회색 */
+    color: #ffffff; /* 흰색으로 변경 */
     opacity: 0.95;
 }
-.app-footer .credits a {
+.app-footer .credits a:not(.help-btn) {
     color: #adb5bd;
     text-decoration: none;
     border-bottom: 1px dashed rgba(173,181,189,0.5);
 }
-.app-footer .credits a:hover {
+.app-footer .credits a:not(.help-btn):hover {
     color: #6c757d;
     border-bottom-color: rgba(108,117,125,0.7);
+}
+
+/* 도움말 버튼 */
+.help-btn {
+    display: inline-block;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    line-height: 1;
+    border-radius: 999px;
+    color: #4facfe;
+    background: #ffffff;
+    border: 1px solid #4facfe;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+.help-btn:hover {
+    color: #ffffff;
+    background: #4facfe;
+    box-shadow: 0 6px 16px rgba(79, 172, 254, 0.25);
 }
 `;
     }

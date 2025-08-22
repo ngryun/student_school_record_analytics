@@ -33,6 +33,10 @@ header h1 {
     font-weight: 300;
 }
 
+.header-actions { 
+    margin-top: 16px; /* 헤더 안내 문구와 버튼 간격 확대 */
+}
+
 /* Lite 배지 스타일 */
 .badge-lite {
     display: inline-block;
@@ -264,21 +268,48 @@ header p {
 /* 하단 크레딧 푸터 */
 .app-footer {
     padding: 12px 40px 24px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+.app-footer .footer-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 .app-footer .credits {
     text-align: right;
     font-size: 0.85rem;
-    color: #adb5bd; /* 더 밝은 회색 */
+    color: #ffffff; /* 흰색으로 변경 */
     opacity: 0.95;
 }
-.app-footer .credits a {
+.app-footer .credits a:not(.help-btn) {
     color: #adb5bd;
     text-decoration: none;
     border-bottom: 1px dashed rgba(173,181,189,0.5);
 }
-.app-footer .credits a:hover {
+.app-footer .credits a:not(.help-btn):hover {
     color: #6c757d;
     border-bottom-color: rgba(108,117,125,0.7);
+}
+
+/* 도움말 버튼 */
+.help-btn {
+    display: inline-block;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    line-height: 1;
+    border-radius: 999px;
+    color: #4facfe;
+    background: #ffffff;
+    border: 1px solid #4facfe;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+.help-btn:hover {
+    color: #ffffff;
+    background: #4facfe;
+    box-shadow: 0 6px 16px rgba(79, 172, 254, 0.25);
 }
 
 .tabs {
