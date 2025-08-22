@@ -996,17 +996,17 @@ header h1 {
 .app-footer .credits {
     text-align: right;
     font-size: 0.85rem;
-    color: #6c757d;
-    opacity: 0.85;
+    color: #adb5bd; /* 더 밝은 회색 */
+    opacity: 0.95;
 }
 .app-footer .credits a {
-    color: #6c757d;
+    color: #adb5bd;
     text-decoration: none;
-    border-bottom: 1px dashed rgba(108,117,125,0.5);
+    border-bottom: 1px dashed rgba(173,181,189,0.5);
 }
 .app-footer .credits a:hover {
-    color: #495057;
-    border-bottom-color: rgba(73,80,87,0.7);
+    color: #6c757d;
+    border-bottom-color: rgba(108,117,125,0.7);
 }
 `;
     }
