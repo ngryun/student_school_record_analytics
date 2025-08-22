@@ -2291,6 +2291,9 @@ document.addEventListener('DOMContentLoaded', () => {
             options: {
                 responsive: true,
                 maintainAspectRatio: true,
+                animation: {
+                    duration: 0
+                },
                 interaction: {
                     intersect: false
                 },
@@ -2392,10 +2395,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const canvasId = `pdfRadar-${student.grade}-${student.class}-${student.number}-${i}`;
                 temp.innerHTML = this.buildStudentDetailHTMLForPrint(student, canvasId);
                 // 차트 렌더
-                await new Promise(r => setTimeout(r, 10));
+                await new Promise(r => setTimeout(r, 50));
                 const canvas = document.getElementById(canvasId);
                 const chartInstance = canvas ? this.createStudentPercentileChartFor(canvas, student) : null;
-                await new Promise(r => setTimeout(r, 50));
+                await new Promise(r => setTimeout(r, 200));
 
                 const element = temp.firstElementChild;
                 // 캔버스 스케일을 낮추고 JPEG로 변환하여 용량 축소
@@ -2447,10 +2450,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             const student = students[i];
                             const canvasId = `pdfRadar-${student.grade}-${student.class}-${student.number}-${i}`;
                             temp.innerHTML = this.buildStudentDetailHTMLForPrint(student, canvasId);
-                            await new Promise(r => setTimeout(r, 10));
+                            await new Promise(r => setTimeout(r, 50));
                             const canvas = document.getElementById(canvasId);
                             const chartInstance = canvas ? this.createStudentPercentileChartFor(canvas, student) : null;
-                            await new Promise(r => setTimeout(r, 50));
+                            await new Promise(r => setTimeout(r, 200));
 
                             const element = temp.firstElementChild;
                             const canvasImg = await html2canvas(element, { scale: 1.3, backgroundColor: '#ffffff', useCORS: true, allowTaint: true });
