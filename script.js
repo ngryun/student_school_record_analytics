@@ -2062,6 +2062,18 @@ document.addEventListener('DOMContentLoaded', () => {
     renderStudentDetail(student) {
         const container = document.getElementById('studentDetailContent');
         
+        // 기존 학급 전체 인쇄 영역 완전 제거
+        const classPrintArea = document.getElementById('classPrintArea');
+        if (classPrintArea) {
+            classPrintArea.remove();
+        }
+        
+        // 학급 전체 인쇄 관련 클래스 제거
+        const studentsTab = document.getElementById('students-tab');
+        if (studentsTab) {
+            studentsTab.classList.remove('only-class-print', 'print-target');
+        }
+        
         // 학점 가중 평균 백분위 계산
         const weightedAveragePercentile = this.calculateWeightedAveragePercentile(student, this.combinedData.subjects);
         
@@ -2162,77 +2174,87 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 100);
     }
 
-    // 학급 전체 인쇄용: 학생 상세 HTML 생성 (캔버스 ID 지정)
+    // 학급 전체 인쇄용: 개별 학생과 완전히 동일한 HTML 구조
     buildStudentDetailHTMLForPrint(student, canvasId) {
         const weightedAveragePercentile = this.calculateWeightedAveragePercentile(student, this.combinedData.subjects);
         const averageGradeRank = student.averageGradeRank;
         const sameGradeCount = student.sameGradeCount;
         const totalGradedStudents = student.totalGradedStudents;
         return `
-            <div class="student-print-page print-area">
-                <div class="student-detail-header">
-                    <div class="student-info">
-                        <h3>${student.name}</h3>
-                        <div class="student-meta">
-                            <span class="grade-class">${student.grade}학년 ${student.class}반 ${student.originalNumber}번</span>
-                            <span class="file-info">출처: ${student.fileName}</span>
+            <div class="student-print-page">
+                <div id="printArea-${canvasId}" class="print-area">
+                    <div class="print-header" style="display: none;">
+                        <h2>학생 성적 분석 보고서</h2>
+                        <div class="print-date">생성일: ${new Date().toLocaleDateString('ko-KR')}</div>
+                    </div>
+                    
+                    <div class="student-detail-header">
+                        <div class="student-info">
+                            <h3>${student.name}</h3>
+                            <div class="student-meta">
+                                <span class="grade-class">${student.grade}학년 ${student.class}반 ${student.originalNumber}번</span>
+                                <span class="file-info">출처: ${student.fileName}</span>
+                            </div>
+                        </div>
+                        <div class="overall-stats">
+                            <div class="stat-card">
+                                <span class="stat-label">평균등급</span>
+                                <span class="stat-value grade">${student.weightedAverageGrade ? student.weightedAverageGrade.toFixed(2) : 'N/A'}</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">전체 학생수</span>
+                                <span class="stat-value">${student.totalStudents || 'N/A'}명</span>
+                            </div>
                         </div>
                     </div>
-                    <div class="overall-stats">
-                        <div class="stat-card">
-                            <span class="stat-label">평균등급</span>
-                            <span class="stat-value grade">${student.weightedAverageGrade ? student.weightedAverageGrade.toFixed(2) : 'N/A'}</span>
-                        </div>
-                        <div class="stat-card">
-                            <span class="stat-label">전체 학생수</span>
-                            <span class="stat-value">${student.totalStudents || 'N/A'}명</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="student-detail-content">
-                    <div class="analysis-overview">
-                        <div class="student-summary">
-                            <div class="summary-card">
-                                <div class="summary-header">
-                                    <h4>학생 정보</h4>
-                                </div>
-                                <div class="summary-grid">
-                                    <div class="summary-item">
-                                        <span class="summary-label">학급</span>
-                                        <span class="summary-value">${student.grade}학년 ${student.class}반 ${student.originalNumber}번</span>
+                    
+                    <div class="student-detail-content">
+                        <div class="analysis-overview">
+                            <div class="student-summary">
+                                <div class="summary-card">
+                                    <div class="summary-header">
+                                        <h4>학생 정보</h4>
                                     </div>
-                                    <div class="summary-item">
-                                        <span class="summary-label">평균등급</span>
-                                        <span class="summary-value highlight">${student.weightedAverageGrade ? student.weightedAverageGrade.toFixed(2) : 'N/A'}</span>
-                                    </div>
-                                    <div class="summary-item">
-                                        <span class="summary-label">평균등급(9등급환산)</span>
-                                        <span class="summary-value orange">${student.weightedAverage9Grade ? student.weightedAverage9Grade.toFixed(2) : 'N/A'}</span>
-                                    </div>
-                                    <div class="summary-item">
-                                        <span class="summary-label">등급 순위</span>
-                                        <span class="summary-value highlight">${averageGradeRank !== null && averageGradeRank !== undefined ? `${averageGradeRank}/${totalGradedStudents}위` + (sameGradeCount > 1 ? ` (${sameGradeCount}명)` : '') : 'N/A'}</span>
-                                    </div>
-                                    <div class="summary-item">
-                                        <span class="summary-label">과목평균 백분위</span>
-                                        <span class="summary-value highlight">${weightedAveragePercentile ? weightedAveragePercentile.toFixed(1) + '%' : 'N/A'}</span>
-                                    </div>
-                                    <div class="summary-item">
-                                        <span class="summary-label">전체 학생수</span>
-                                        <span class="summary-value">${student.totalStudents || 'N/A'}명</span>
+                                    <div class="summary-grid">
+                                        <div class="summary-item">
+                                            <span class="summary-label">학급</span>
+                                            <span class="summary-value">${student.grade}학년 ${student.class}반 ${student.originalNumber}번</span>
+                                        </div>
+                                        <div class="summary-item">
+                                            <span class="summary-label">평균등급</span>
+                                            <span class="summary-value highlight">${student.weightedAverageGrade ? student.weightedAverageGrade.toFixed(2) : 'N/A'}</span>
+                                        </div>
+                                        <div class="summary-item">
+                                            <span class="summary-label">평균등급(9등급환산)</span>
+                                            <span class="summary-value orange">${student.weightedAverage9Grade ? student.weightedAverage9Grade.toFixed(2) : 'N/A'}</span>
+                                        </div>
+                                        <div class="summary-item">
+                                            <span class="summary-label">등급 순위</span>
+                                            <span class="summary-value highlight">${averageGradeRank !== null && averageGradeRank !== undefined ? `${averageGradeRank}/${totalGradedStudents}위` + (sameGradeCount > 1 ? ` (${sameGradeCount}명)` : '') : 'N/A'}</span>
+                                        </div>
+                                        <div class="summary-item">
+                                            <span class="summary-label">과목평균 백분위</span>
+                                            <span class="summary-value highlight">${weightedAveragePercentile ? weightedAveragePercentile.toFixed(1) + '%' : 'N/A'}</span>
+                                        </div>
+                                        <div class="summary-item">
+                                            <span class="summary-label">전체 학생수</span>
+                                            <span class="summary-value">${student.totalStudents || 'N/A'}명</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
+                            
+                            <div class="chart-container">
+                                <h4>과목별 등급</h4>
+                                <canvas id="${canvasId}" width="400" height="400"></canvas>
+                            </div>
                         </div>
-                        <div class="chart-container">
-                            <h4>과목별 등급</h4>
-                            <canvas id="${canvasId}" width="400" height="400"></canvas>
-                        </div>
-                    </div>
-                    <div class="subject-details">
-                        <h4>과목별 상세 분석</h4>
-                        <div class="subject-cards">
-                            ${this.renderSubjectCards(student)}
+                        
+                        <div class="subject-details">
+                            <h4>과목별 상세 분석</h4>
+                            <div class="subject-cards">
+                                ${this.renderSubjectCards(student)}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2290,51 +2312,109 @@ document.addEventListener('DOMContentLoaded', () => {
             const classSelect = document.getElementById('classSelect');
             const grade = gradeSelect.value;
             const cls = classSelect.value;
+            
             if (!grade || !cls) {
                 alert('학년과 반을 선택해 주세요.');
                 return;
             }
-            const students = this.combinedData.students.filter(s => String(s.grade) === String(grade) && String(s.class) === String(cls));
+            
+            const students = this.combinedData.students.filter(s => 
+                String(s.grade) === String(grade) && String(s.class) === String(cls)
+            );
+            
             if (students.length === 0) {
                 alert('선택한 학급의 학생이 없습니다.');
                 return;
             }
 
-            // 출력 영역 구성
+            // 기존 인쇄 영역 정리
             let container = document.getElementById('classPrintArea');
-            if (!container) {
-                container = document.createElement('div');
-                container.id = 'classPrintArea';
-                container.className = 'class-print-area';
-                document.getElementById('students-tab').appendChild(container);
+            if (container) {
+                container.remove();
             }
-            container.innerHTML = '';
+            
+            // 새 출력 영역 구성
+            container = document.createElement('div');
+            container.id = 'classPrintArea';
+            container.className = 'class-print-area';
+            document.getElementById('students-tab').appendChild(container);
 
-            // 학생별 페이지 추가 및 차트 렌더
+            // 학생별 페이지 HTML 생성
             const charts = [];
             students.forEach((student, idx) => {
                 const canvasId = `classRadar-${student.grade}-${student.class}-${student.number}-${idx}`;
                 container.insertAdjacentHTML('beforeend', this.buildStudentDetailHTMLForPrint(student, canvasId));
             });
-            await new Promise(r => setTimeout(r, 50));
-            students.forEach((student, idx) => {
-                const canvas = document.getElementById(`classRadar-${student.grade}-${student.class}-${student.number}-${idx}`);
-                if (canvas) {
-                    const chart = this.createStudentPercentileChartFor(canvas, student);
-                    if (chart) charts.push(chart);
-                }
-            });
 
-            // 인쇄 타깃 지정 후 인쇄
+            // DOM 렌더링 대기 (더 충분한 시간 확보)
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // 차트 생성
+            for (let idx = 0; idx < students.length; idx++) {
+                const student = students[idx];
+                const canvasId = `classRadar-${student.grade}-${student.class}-${student.number}-${idx}`;
+                const canvas = document.getElementById(canvasId);
+                
+                if (canvas) {
+                    try {
+                        const chart = this.createStudentPercentileChartFor(canvas, student);
+                        if (chart) {
+                            charts.push(chart);
+                        }
+                    } catch (chartError) {
+                        console.warn(`차트 생성 실패 (학생: ${student.name}):`, chartError);
+                    }
+                }
+            }
+
+            // 차트 렌더링 완료 대기
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            // 인쇄 타깃 설정
+            const studentsTab = document.getElementById('students-tab');
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('print-target'));
-            document.getElementById('students-tab').classList.add('print-target');
+            studentsTab.classList.add('print-target', 'only-class-print');
+
+            // 스케일링 적용
+            const pages = document.querySelectorAll('.class-print-area .student-print-page');
+            pages.forEach(page => page.classList.add('apply-print-scale'));
+            document.documentElement.style.setProperty('--page-scale', '0.85');
+
+            // 인쇄 실행
             window.print();
 
-            // 정리 (차트 파괴 및 컨테이너 비우기)
-            setTimeout(() => {
-                charts.forEach(c => { try { c.destroy(); } catch (_) {} });
-                //container.innerHTML = '';
-            }, 500);
+            // 인쇄 완료 후 정리
+            const cleanup = () => {
+                try {
+                    // 차트 파괴
+                    charts.forEach(chart => {
+                        try {
+                            if (chart && typeof chart.destroy === 'function') {
+                                chart.destroy();
+                            }
+                        } catch (e) {
+                            console.warn('차트 파괴 중 오류:', e);
+                        }
+                    });
+                    
+                    // 클래스 및 스타일 정리
+                    studentsTab.classList.remove('only-class-print', 'print-target');
+                    document.documentElement.style.removeProperty('--page-scale');
+                    
+                    // 스케일 클래스 제거
+                    pages.forEach(page => page.classList.remove('apply-print-scale'));
+                    
+                } catch (cleanupError) {
+                    console.warn('정리 중 오류:', cleanupError);
+                }
+            };
+
+            // afterprint 이벤트로 정리
+            window.addEventListener('afterprint', cleanup, { once: true });
+            
+            // 백업 타이머 (이벤트가 발생하지 않을 경우)
+            setTimeout(cleanup, 2000);
+
         } catch (err) {
             console.error('학급 전체 인쇄 오류:', err);
             alert('학급 전체 인쇄 중 오류가 발생했습니다: ' + err.message);

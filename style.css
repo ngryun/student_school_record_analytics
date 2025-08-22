@@ -1586,6 +1586,43 @@ header p {
     .tab-content:not(.print-target) {
         display: none !important;
     }
+
+    /* 학생 탭 인쇄 시 개인 상세 페이지만 표시 */
+    #students-tab.only-class-print > *:not(.class-print-area) {
+        display: none !important;
+    }
+
+    /* A4에 맞춘 폭 고정 및 중앙 정렬 */
+    .class-print-area {
+        width: 190mm;
+        margin: 0 auto;
+    }
+    .class-print-area .student-print-page {
+        width: 190mm;
+    }
+
+    /* 학급 전체 인쇄 모드: 더 컴팩트한 카드와 차트 크기 */
+    #students-tab.only-class-print .student-detail-header {
+        padding: 12px;
+        margin-bottom: 10px;
+    }
+    #students-tab.only-class-print .student-info h3 {
+        font-size: 14px;
+    }
+    #students-tab.only-class-print .student-meta {
+        font-size: 11px;
+    }
+    #students-tab.only-class-print .summary-card,
+    #students-tab.only-class-print .stat-card {
+        margin-bottom: 8px;
+        padding: 10px;
+    }
+    /* 학급 전체 인쇄: 개별 학생과 동일한 레이아웃 사용 */
+    #students-tab.only-class-print .student-print-page {
+        page-break-after: always;
+        margin-bottom: 0;
+        background: white;
+    }
     
     /* 별도 프린트 헤더는 사용하지 않음 */
     .print-header {
