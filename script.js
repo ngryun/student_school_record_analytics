@@ -428,38 +428,157 @@ class ScoreAnalyzer {
             }
         }
 
+        // 1) 행 단위(세로형) 양식 감지: 4행에 '번 호', '성 명', '과 목', '원점수/과목평균' 헤더가 있는 경우
+        const headerRow = data[3] || [];
+        const isRowBasedFormat = headerRow && headerRow.length >= 8 &&
+            String(headerRow[0]).includes('번') && String(headerRow[1]).includes('성') &&
+            String(headerRow[5]).includes('과 목') && String(headerRow[7]).includes('원점수');
+
+        if (isRowBasedFormat) {
+            this.parseRowBasedFormat(data, fileData);
+            return fileData;
+        }
+
+        // 2) 기존 가로형 양식: 과목명이 D열부터 "국어(4)"와 같이 표기된 경우
         // 과목명 추출 (행 4, D열부터) - 0-based index로는 행 3
         const subjectRow = data[3]; // 행 4
-        for (let i = 3; i < subjectRow.length; i++) { // D열부터
-            const cellValue = subjectRow[i];
-            if (cellValue && typeof cellValue === 'string' && cellValue.includes('(')) {
-                const match = cellValue.match(/^(.+)\((\d+)\)$/);
-                if (match) {
-                    fileData.subjects.push({
-                        name: match[1].trim(),
-                        credits: parseInt(match[2]),
-                        columnIndex: i,
-                        scores: []
-                    });
+        if (subjectRow) {
+            for (let i = 3; i < subjectRow.length; i++) { // D열부터
+                const cellValue = subjectRow[i];
+                if (cellValue && typeof cellValue === 'string' && cellValue.includes('(')) {
+                    const match = cellValue.match(/^(.+)\((\d+)\)$/);
+                    if (match) {
+                        fileData.subjects.push({
+                            name: match[1].trim(),
+                            credits: parseInt(match[2]),
+                            columnIndex: i,
+                            scores: []
+                        });
+                    }
                 }
             }
         }
 
         // 과목별 평균 (행 5) - 0-based index로는 행 4
-        const averageRow = data[4];
+        const averageRow = data[4] || [];
         fileData.subjects.forEach(subject => {
             const avgValue = averageRow[subject.columnIndex];
             subject.average = avgValue ? parseFloat(avgValue) : 0;
         });
 
         // 성취도 분포 (행 6) - 0-based index로는 행 5
-        const distributionRow = data[5];
+        const distributionRow = data[5] || [];
         this.parseAchievementDistribution(distributionRow, fileData.subjects);
 
         // 학생 데이터 파싱 (행 7부터 시작, 5행씩 묶여있음)
         this.parseStudentData(data, fileData);
 
         return fileData;
+    }
+
+    // 행 단위(세로형) NEIS "XLS data" 전용 파서
+    parseRowBasedFormat(data, fileData) {
+        // 헤더 행 탐색 (앞부분 10행 내에서 '번 호'와 '성 명'이 보이면 그 다음 행부터 데이터 시작)
+        let headerIndex = 3;
+        for (let r = 0; r <= Math.min(9, data.length - 1); r++) {
+            const row = data[r] || [];
+            if (String(row[0] || '').includes('번') && String(row[1] || '').includes('성') && String(row[7] || '').includes('원점수')) {
+                headerIndex = r;
+                break;
+            }
+        }
+
+        const startRow = headerIndex + 1;
+        const lastRow = data.length - 1;
+
+        // 과목 집계용 맵: name -> { name, credits, average }
+        const subjectMap = new Map();
+
+        let currentStudent = null;
+        for (let r = startRow; r <= lastRow; r++) {
+            const row = data[r] || [];
+
+            // 종료 조건: 완전 빈 행들이 길게 이어질 경우 탈출
+            const isEmptyRow = !row || row.every(v => v === undefined || v === null || String(v).trim() === '');
+            if (isEmptyRow) continue;
+
+            const a = row[0]; // 번 호
+            const b = row[1]; // 성 명
+            const e = row[4]; // 교 과
+            const f = row[5]; // 과 목
+            const g = row[6]; // 학 점
+            const h = row[7]; // 원점수/과목평균
+
+            const aText = a !== undefined && a !== null ? String(a).trim() : '';
+
+            // 합계 라인 처리: "이수학점 합계" 등장 시 학생 종료
+            if (aText.includes('이수학점')) {
+                if (currentStudent) {
+                    // 학생 마무리 계산
+                    currentStudent.weightedAverageGrade = this.calculateWeightedAverageGrade(currentStudent, Array.from(subjectMap.values()));
+                    currentStudent.weightedAverage9Grade = this.calculateWeightedAverage9Grade(currentStudent, Array.from(subjectMap.values()));
+                    fileData.students.push(currentStudent);
+                    currentStudent = null;
+                }
+                continue;
+            }
+
+            // 새 학생 시작 (A열이 숫자)
+            const parsedNumber = aText ? parseInt(aText, 10) : NaN;
+            if (!Number.isNaN(parsedNumber)) {
+                // 이전 학생 종료
+                if (currentStudent) {
+                    currentStudent.weightedAverageGrade = this.calculateWeightedAverageGrade(currentStudent, Array.from(subjectMap.values()));
+                    currentStudent.weightedAverage9Grade = this.calculateWeightedAverage9Grade(currentStudent, Array.from(subjectMap.values()));
+                    fileData.students.push(currentStudent);
+                }
+                currentStudent = {
+                    number: parsedNumber,
+                    name: b ? String(b).trim() : `학생${parsedNumber}`,
+                    scores: {},
+                    achievements: {},
+                    grades: {},
+                    ranks: {},
+                    totalStudents: null
+                };
+            }
+
+            // 과목 행 처리 (과 목, 학 점, 원점수/과목평균이 존재할 때)
+            const subjectName = f ? String(f).trim() : '';
+            const creditVal = g !== undefined && g !== null && String(g).trim() !== '' ? parseInt(g, 10) : null;
+            const scoreAvgText = h !== undefined && h !== null ? String(h).trim() : '';
+            const scoreAvgMatch = scoreAvgText.match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
+
+            if (currentStudent && subjectName && creditVal && scoreAvgMatch) {
+                const score = parseFloat(scoreAvgMatch[1]);
+                const avg = parseFloat(scoreAvgMatch[2]);
+
+                // 학생 점수 기록
+                currentStudent.scores[subjectName] = score;
+
+                // 과목 메타 업데이트
+                if (!subjectMap.has(subjectName)) {
+                    subjectMap.set(subjectName, {
+                        name: subjectName,
+                        credits: creditVal,
+                        average: avg,
+                        columnIndex: null,
+                        scores: []
+                    });
+                }
+            }
+        }
+
+        // 파일 끝에서 학생이 열린 채로 남아있다면 마감
+        if (currentStudent) {
+            currentStudent.weightedAverageGrade = this.calculateWeightedAverageGrade(currentStudent, Array.from(subjectMap.values()));
+            currentStudent.weightedAverage9Grade = this.calculateWeightedAverage9Grade(currentStudent, Array.from(subjectMap.values()));
+            fileData.students.push(currentStudent);
+        }
+
+        // 파일 과목 목록 확정
+        fileData.subjects = Array.from(subjectMap.values());
+        console.log(`행 단위 양식 파싱: 과목 ${fileData.subjects.length}개, 학생 ${fileData.students.length}명`);
     }
 
     parseAchievementDistribution(distributionRow, subjects) {
@@ -491,35 +610,42 @@ class ScoreAnalyzer {
         // 행 9: 석차등급  
         // 행 10: 석차
         // 행 11: 수강자수
-        
-        let consecutiveEmptyRows = 0;
-        const maxConsecutiveEmpty = 15; // 연속으로 15행이 비어있으면 종료
-        
-        for (let i = 6; i < data.length; i += 5) { // 0-based로 행 7부터, 5행씩 건너뛰기
+
+        // 시트의 마지막 유효 행 추정 (아무 셀이나 값이 있는 마지막 행)
+        let lastNonEmptyRow = data.length - 1;
+        for (let r = data.length - 1; r >= 0; r--) {
+            const row = data[r];
+            if (row && row.some(cell => cell !== undefined && cell !== null && String(cell).trim() !== '')) {
+                lastNonEmptyRow = r;
+                break;
+            }
+        }
+
+        // i를 직접 제어하여, 정렬이 어긋난 경우 한 줄씩 앞으로 이동하며 재동기화
+        let i = 6; // 0-based로 행 7부터 시작
+        while (i <= lastNonEmptyRow) {
             const scoreRow = data[i];     // 합계(원점수) 행
             const achievementRow = data[i + 1]; // 성취도 행
             const gradeRow = data[i + 2];       // 석차등급 행
             const rankRow = data[i + 3];        // 석차 행
             const totalRow = data[i + 4];       // 수강자수 행
-            
+
             // 학생 번호가 있는지 확인 (A열)
-            if (!scoreRow || !scoreRow[0] || isNaN(scoreRow[0])) {
-                consecutiveEmptyRows += 5; // 5행씩 건너뛰므로 5 증가
-                if (consecutiveEmptyRows >= maxConsecutiveEmpty) {
-                    console.log(`연속으로 ${consecutiveEmptyRows}행이 비어있어 파싱을 종료합니다. (행 ${i + 1})`);
-                    break;
-                }
-                continue; // 빈 행은 건너뛰고 다음 학생 찾기
+            const rawNumber = scoreRow && scoreRow[0] !== undefined ? String(scoreRow[0]).trim() : '';
+            // '2', 2, '02', '2번' 등도 허용
+            const parsedNumber = rawNumber ? parseInt(rawNumber, 10) : NaN;
+
+            if (!scoreRow || !rawNumber || Number.isNaN(parsedNumber)) {
+                // 현재 위치가 학생 블록 시작이 아니면 한 행씩 이동하여 재동기화 시도
+                i += 1;
+                continue;
             }
-            
-            // 유효한 학생 데이터를 찾았으면 연속 빈 행 카운터 리셋
-            consecutiveEmptyRows = 0;
-            
-            console.log(`학생 발견: 행 ${i + 1}, 번호: ${scoreRow[0]}, 이름: ${scoreRow[1] || '미기입'}`);
-            
+
+            console.log(`학생 발견: 행 ${i + 1}, 번호: ${parsedNumber}, 이름: ${scoreRow[1] || '미기입'}`);
+
             const student = {
-                number: scoreRow[0],
-                name: scoreRow[1] || `학생${scoreRow[0]}`, // B열에서 학생 이름 추출
+                number: parsedNumber,
+                name: scoreRow[1] || `학생${parsedNumber}`, // B열에서 학생 이름 추출
                 scores: {},
                 achievements: {},
                 grades: {},
@@ -530,31 +656,31 @@ class ScoreAnalyzer {
             // 각 과목별 데이터 추출
             fileData.subjects.forEach(subject => {
                 const colIndex = subject.columnIndex;
-                
+
                 // 점수 (원점수 추출)
-                if (scoreRow[colIndex]) {
+                if (scoreRow && scoreRow[colIndex]) {
                     const scoreText = scoreRow[colIndex].toString();
                     const scoreMatch = scoreText.match(/(\d+\.?\d*)\((\d+)\)/);
                     if (scoreMatch) {
                         student.scores[subject.name] = parseFloat(scoreMatch[2]); // 원점수
                     }
                 }
-                
+
                 // 성취도
                 if (achievementRow && achievementRow[colIndex]) {
                     student.achievements[subject.name] = achievementRow[colIndex];
                 }
-                
+
                 // 석차등급
                 if (gradeRow && gradeRow[colIndex] && !isNaN(gradeRow[colIndex])) {
                     student.grades[subject.name] = parseInt(gradeRow[colIndex]);
                 }
-                
+
                 // 석차
                 if (rankRow && rankRow[colIndex] && !isNaN(rankRow[colIndex])) {
                     student.ranks[subject.name] = parseInt(rankRow[colIndex]);
                 }
-                
+
                 // 수강자수 (첫 번째 과목에서만 가져오기)
                 if (!student.totalStudents && totalRow && totalRow[colIndex] && !isNaN(totalRow[colIndex])) {
                     student.totalStudents = parseInt(totalRow[colIndex]);
@@ -563,13 +689,16 @@ class ScoreAnalyzer {
 
             // 가중평균등급 계산
             student.weightedAverageGrade = this.calculateWeightedAverageGrade(student, fileData.subjects);
-            
+
             // 9등급 환산 평균 계산
             student.weightedAverage9Grade = this.calculateWeightedAverage9Grade(student, fileData.subjects);
-            
+
             fileData.students.push(student);
+
+            // 정상적인 학생 블록을 처리했으므로 5행 건너뛰기
+            i += 5;
         }
-        
+
         console.log(`총 ${fileData.students.length}명의 학생 데이터를 파싱했습니다.`);
     }
 

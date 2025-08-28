@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>XLSX 구조 테스트</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <input type="file" id="file" accept=".xlsx,.xls">
+    <div id="output"></div>
+    
+    <script>
+        document.getElementById('file').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = e.target.result;
+                const workbook = XLSX.read(data, {type: 'binary'});
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                
+                // A3 셀 확인
+                const a3 = worksheet['A3'];
+                console.log('A3 내용:', a3 ? a3.v : 'empty');
+                
+                // 4행 컬럼명 확인
+                const headers = [];
+                const headerCells = ['A4', 'B4', 'C4', 'D4', 'E4', 'F4', 'G4', 'H4'];
+                headerCells.forEach(cell => {
+                    const cellValue = worksheet[cell];
+                    headers.push(cellValue ? cellValue.v : 'empty');
+                });
+                console.log('4행 컬럼명:', headers);
+                
+                // 처음 몇 행의 데이터 확인
+                const range = XLSX.utils.decode_range(worksheet['!ref']);
+                console.log('전체 범위:', range);
+                
+                const output = document.getElementById('output');
+                output.innerHTML = `
+                    <h3>양식 구조 분석 결과:</h3>
+                    <p><strong>A3:</strong> ${a3 ? a3.v : 'empty'}</p>
+                    <p><strong>4행 컬럼명:</strong> ${headers.join(' | ')}</p>
+                    <p><strong>전체 범위:</strong> ${range.s.r}-${range.e.r}행, ${range.s.c}-${range.e.c}열</p>
+                    
+                    <h4>처음 10행 데이터:</h4>
+                    <pre id="sampleData"></pre>
+                `;
+                
+                // 처음 10행 데이터 출력
+                let sampleText = '';
+                for (let r = 0; r <= Math.min(10, range.e.r); r++) {
+                    let row = [];
+                    for (let c = 0; c <= Math.min(7, range.e.c); c++) {
+                        const cellRef = XLSX.utils.encode_cell({r, c});
+                        const cell = worksheet[cellRef];
+                        row.push(cell ? cell.v : '');
+                    }
+                    sampleText += `${r + 1}행: ${row.join(' | ')}\n`;
+                }
+                document.getElementById('sampleData').textContent = sampleText;
+            };
+            reader.readAsBinaryString(file);
+        });
+    </script>
+</body>
+</html>
