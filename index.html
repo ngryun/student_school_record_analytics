@@ -151,11 +151,30 @@
         <footer class="app-footer">
             <div class="footer-right">
                 <div class="credits">Made by NAMGUNG YEON (Seolak high school)</div>
+                <span class="updated" id="lastUpdated"></span>
                 <a class="help-btn" href="https://namgungyeon.tistory.com/133" target="_blank" rel="noopener" title="도움말 보기">❔ 도움말</a>
             </div>
         </footer>
     </div>
 
     <script src="script.js"></script>
+    <script>
+        (function updateLastUpdated() {
+            try {
+                const el = document.getElementById('lastUpdated');
+                if (!el) return;
+                const parts = new Intl.DateTimeFormat('en-CA', {
+                    timeZone: 'Asia/Seoul',
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', hour12: false
+                }).formatToParts(new Date());
+                const get = (t) => (parts.find(p => p.type === t) || {}).value || '';
+                const text = `Last updated: ${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')} (KST)`;
+                el.textContent = text;
+            } catch (e) {
+                // no-op
+            }
+        })();
+    </script>
 </body>
 </html>
