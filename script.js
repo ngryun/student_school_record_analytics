@@ -544,23 +544,7 @@ class ScoreAnalyzer {
                 if (achievementRow && achievementRow[colIndex]) {
                     student.achievements[subject.name] = achievementRow[colIndex];
                 }
-<<<<<<< Updated upstream
                 
-                // 석차등급
-                if (gradeRow && gradeRow[colIndex] && !isNaN(gradeRow[colIndex])) {
-                    student.grades[subject.name] = parseInt(gradeRow[colIndex]);
-                }
-                
-                // 석차
-                if (rankRow && rankRow[colIndex] && !isNaN(rankRow[colIndex])) {
-                    student.ranks[subject.name] = parseInt(rankRow[colIndex]);
-                }
-                
-                // 수강자수 (첫 번째 과목에서만 가져오기)
-                if (!student.totalStudents && totalRow && totalRow[colIndex] && !isNaN(totalRow[colIndex])) {
-                    student.totalStudents = parseInt(totalRow[colIndex]);
-=======
-
                 // 석차등급 (문자 혼입 시 숫자만 추출)
                 if (gradeRow && gradeRow[colIndex] !== undefined && gradeRow[colIndex] !== null) {
                     const gradeText = String(gradeRow[colIndex]).trim();
@@ -586,7 +570,6 @@ class ScoreAnalyzer {
                     if (tm) {
                         student.totalStudents = parseInt(tm[0], 10);
                     }
->>>>>>> Stashed changes
                 }
             });
 
