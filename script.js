@@ -25,7 +25,7 @@ class ScoreAnalyzer {
     initializeEventListeners() {
         const fileInput = document.getElementById('excelFiles');
         const analyzeBtn = document.getElementById('analyzeBtn');
-        const exportBtn = document.getElementById('exportBtn');
+        const exportCsvBtn = document.getElementById('exportCsvBtn');
         const tabBtns = document.querySelectorAll('.tab-btn');
         const studentSearch = document.getElementById('studentSearch');
         const gradeSelect = document.getElementById('gradeSelect');
@@ -98,6 +98,10 @@ class ScoreAnalyzer {
 
         analyzeBtn.addEventListener('click', () => {
             this.analyzeFiles();
+        });
+
+        exportCsvBtn.addEventListener('click', () => {
+            this.exportToCSV();
         });
 
         
@@ -189,8 +193,8 @@ class ScoreAnalyzer {
             this.hideLoading();
 
             // Enable export button after successful analysis
-            const exportBtn = document.getElementById('exportBtn');
-            if (exportBtn) exportBtn.disabled = false;
+            const exportCsvBtn = document.getElementById('exportCsvBtn');
+            if (exportCsvBtn) exportCsvBtn.disabled = false;
         } catch (error) {
             this.hideLoading();
             this.showError('파일 분석 중 오류가 발생했습니다: ' + error.message);
@@ -2860,6 +2864,133 @@ document.addEventListener('DOMContentLoaded', () => {
 
     hideError() {
         document.getElementById('error').style.display = 'none';
+    }
+
+    exportToCSV() {
+        if (!this.combinedData || !this.combinedData.students || this.combinedData.students.length === 0) {
+            this.showError('분석된 학생 데이터가 없습니다. 먼저 분석을 진행해주세요.');
+            return;
+        }
+
+        try {
+            // CSV 헤더 생성
+            const subjects = this.combinedData.subjects;
+            const headers = [
+                '평균등급(5등급)', '평균등급(9등급환산)'
+            ];
+            
+            // 과목별 등급(5등급) 헤더 추가
+            subjects.forEach(subject => {
+                headers.push(`${subject.name}(5등급)`);
+            });
+            
+            // 과목별 등급(9등급환산) 헤더 추가  
+            subjects.forEach(subject => {
+                headers.push(`${subject.name}(9등급환산)`);
+            });
+
+            // 9등급 환산 평균 순으로 정렬 (오름차순)
+            const sortedStudents = [...this.combinedData.students].sort((a, b) => {
+                const gradeA = a.weightedAverage9Grade || 999; // null인 경우 맨 뒤로
+                const gradeB = b.weightedAverage9Grade || 999;
+                return gradeA - gradeB;
+            });
+
+            // CSV 데이터 생성
+            const csvData = [headers];
+            
+            sortedStudents.forEach(student => {
+                const row = [
+                    student.weightedAverageGrade ? student.weightedAverageGrade.toFixed(2) : '',
+                    student.weightedAverage9Grade ? student.weightedAverage9Grade.toFixed(2) : ''
+                ];
+
+                // 과목별 등급(5등급) 데이터 추가
+                subjects.forEach(subject => {
+                    const grade = student.grades[subject.name];
+                    row.push(grade || '');
+                });
+
+                // 과목별 등급(9등급환산) 데이터 추가
+                subjects.forEach(subject => {
+                    const grade = student.grades[subject.name];
+                    if (grade) {
+                        // 5등급을 9등급으로 환산
+                        const grade9 = this.convertTo9Grade(grade);
+                        row.push(grade9);
+                    } else {
+                        row.push('');
+                    }
+                });
+
+                csvData.push(row);
+            });
+
+            // CSV 문자열로 변환
+            const csvContent = csvData.map(row => 
+                row.map(field => {
+                    // 필드에 쉼표, 따옴표, 줄바꿈이 있으면 따옴표로 감싸기
+                    if (typeof field === 'string' && (field.includes(',') || field.includes('"') || field.includes('\n'))) {
+                        return '"' + field.replace(/"/g, '""') + '"';
+                    }
+                    return field;
+                }).join(',')
+            ).join('\n');
+
+            // BOM을 추가하여 한글이 제대로 표시되도록 함
+            const BOM = '\uFEFF';
+            const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+
+            // 파일 다운로드
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            
+            // 파일명 생성 (현재 날짜 포함)
+            const now = new Date();
+            const dateStr = now.getFullYear() + 
+                           String(now.getMonth() + 1).padStart(2, '0') + 
+                           String(now.getDate()).padStart(2, '0') + '_' +
+                           String(now.getHours()).padStart(2, '0') + 
+                           String(now.getMinutes()).padStart(2, '0');
+            
+            link.setAttribute('download', `학생성적분석_취합데이터_${dateStr}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            console.log(`CSV 파일이 생성되었습니다. 총 ${this.combinedData.students.length}명의 학생 데이터가 포함됩니다.`);
+
+        } catch (error) {
+            this.showError('CSV 파일 생성 중 오류가 발생했습니다: ' + error.message);
+            console.error('CSV export error:', error);
+        }
+    }
+
+    // 5등급을 9등급으로 환산하는 메소드
+    convertTo9Grade(grade5) {
+        if (!grade5 || grade5 < 1 || grade5 > 5) return '';
+        
+        // 5등급 → 9등급 환산표
+        const conversionTable = {
+            1: [1, 2],      // 1등급 → 1,2등급
+            2: [3, 4],      // 2등급 → 3,4등급  
+            3: [5, 6],      // 3등급 → 5,6등급
+            4: [7, 8],      // 4등급 → 7,8등급
+            5: [9]          // 5등급 → 9등급
+        };
+        
+        const range = conversionTable[grade5];
+        if (!range) return '';
+        
+        // 범위의 중간값 반환 (예: [1,2] → 1.5, [9] → 9)
+        if (range.length === 1) {
+            return range[0];
+        } else {
+            return (range[0] + range[1]) / 2;
+        }
     }
 }
 
