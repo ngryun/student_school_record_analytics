@@ -164,13 +164,7 @@
             try {
                 const el = document.getElementById('lastUpdated');
                 if (!el) return;
-                const parts = new Intl.DateTimeFormat('en-CA', {
-                    timeZone: 'Asia/Seoul',
-                    year: 'numeric', month: '2-digit', day: '2-digit',
-                    hour: '2-digit', minute: '2-digit', hour12: false
-                }).formatToParts(new Date());
-                const get = (t) => (parts.find(p => p.type === t) || {}).value || '';
-                const text = `Last updated: ${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')} (KST)`;
+                const text = 'Last updated: 2025-09-09 12:07 (KST)';
                 el.textContent = text;
             } catch (e) {
                 // no-op
