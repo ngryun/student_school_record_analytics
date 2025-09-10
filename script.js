@@ -306,6 +306,7 @@ class ScoreAnalyzer {
 
             if (studentsWithRanks.length === 0) return;
 
+            // 기본 분모: 실제 집계된 석차 보유자 수
             const totalStudents = studentsWithRanks.length;
 
             // 각 학생의 백분위 계산
@@ -319,9 +320,13 @@ class ScoreAnalyzer {
                 // 해당 석차보다 나쁜 석차의 학생 수 (석차가 높은 학생들)
                 const worseRankCount = studentsWithRanks.filter(s => s.rank > studentRank).length;
                 
-                // 백분위 계산: (더 나쁜 석차 학생 수 + 동점자의 절반) / 전체 학생 수 * 100
-                // 이렇게 하면 1등(rank=1)이 가장 높은 백분위를 갖게 됨
-                const percentile = ((worseRankCount + (sameRankCount - 1) / 2) / totalStudents) * 100;
+                // 분모 선택: 과목별 수강자수(subjectTotals)가 있으면 그 값을 우선 사용
+                const subjTotal = item.student.subjectTotals && item.student.subjectTotals[subject.name]
+                    ? item.student.subjectTotals[subject.name]
+                    : totalStudents;
+                // 백분위 계산(동점 보정): (전체 - 석차 + 0.5) / 전체 * 100
+                const raw = ((subjTotal - studentRank + 0.5) / Math.max(1, subjTotal)) * 100;
+                const percentile = raw;
                 
                 // 0~100 범위로 제한하고 내림 처리하여 경계 상향 편향 방지
                 const finalPercentile = Math.max(0, Math.min(100, Math.floor(percentile)));
@@ -538,6 +543,8 @@ class ScoreAnalyzer {
             // 각 과목별 데이터 추출
             fileData.subjects.forEach(subject => {
                 const colIndex = subject.columnIndex;
+                // 과목별 수강자수 저장을 위해 초기화
+                if (!student.subjectTotals) student.subjectTotals = {};
                 
                 // 점수 (원점수 추출)
                 if (scoreRow[colIndex]) {
@@ -571,12 +578,17 @@ class ScoreAnalyzer {
                     }
                 }
 
-                // 수강자수 (첫 번째 과목에서만 가져오기, 숫자만 추출)
-                if (!student.totalStudents && totalRow && totalRow[colIndex] !== undefined && totalRow[colIndex] !== null) {
+                // 수강자수 (과목별로 저장) 숫자만 추출
+                if (totalRow && totalRow[colIndex] !== undefined && totalRow[colIndex] !== null) {
                     const totalText = String(totalRow[colIndex]).trim();
                     const tm = totalText.match(/\d+/);
                     if (tm) {
-                        student.totalStudents = parseInt(tm[0], 10);
+                        const total = parseInt(tm[0], 10);
+                        student.subjectTotals[subject.name] = total;
+                        // 기존 totalStudents는 호환을 위해 첫 과목에서만 설정 (전체 학생 수 표시용)
+                        if (!student.totalStudents) {
+                            student.totalStudents = total;
+                        }
                     }
                 }
             });
@@ -877,7 +889,7 @@ class ScoreAnalyzer {
         })();
         const doc = parser.parseFromString(indexSrc, 'text/html');
         const preload = doc.createElement('script');
-        preload.textContent = `window.PRELOADED_DATA = ${JSON.stringify(this.combinedData)};`;
+        preload.textContent = `window.APP_BUILD_UTC = new Date().toISOString();\nwindow.PRELOADED_DATA = ${JSON.stringify(this.combinedData)};`;
         const appScript = doc.querySelector('script[src="script.js"]');
         if (appScript) appScript.before(preload); else { doc.body.appendChild(preload); const s = doc.createElement('script'); s.src = 'script.js'; doc.body.appendChild(s); }
         const indexOut = '<!DOCTYPE html>' + doc.documentElement.outerHTML;
@@ -3329,7 +3341,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const appScript = doc.querySelector('script[src="script.js"]');
             const preload = doc.createElement('script');
-            preload.textContent = `window.PRELOADED_DATA = ${analysisData};`;
+            preload.textContent = `window.APP_BUILD_UTC = new Date().toISOString();\nwindow.PRELOADED_DATA = ${analysisData};`;
             const inline = doc.createElement('script');
             // jsText가 없을 때는 독립형 Standalone 스크립트(getScriptJS)로 대체하여 동일 렌더링 보장
             const inlineJs = jsText && jsText.trim() ? jsText : (this.getScriptJS ? (await this.getScriptJS()) : '');

@@ -165,8 +165,20 @@
             try {
                 const el = document.getElementById('lastUpdated');
                 if (!el) return;
-                const text = 'Last updated: 2025-09-09 12:07 (KST)';
-                el.textContent = text;
+                const pad = (n) => String(n).padStart(2, '0');
+                // 우선순위: 빌드 시각(APP_BUILD_UTC) > 문서 수정 시각 > 현재 시각
+                const src = (window.APP_BUILD_UTC ? new Date(window.APP_BUILD_UTC) : null)
+                           || (document.lastModified ? new Date(document.lastModified) : null)
+                           || new Date();
+                // KST 계산 (UTC 오프셋 +9시간)
+                const utc = src.getTime() + (src.getTimezoneOffset() * 60000);
+                const kstDate = new Date(utc + 9 * 3600000);
+                const y = kstDate.getFullYear();
+                const m = pad(kstDate.getMonth() + 1);
+                const d = pad(kstDate.getDate());
+                const hh = pad(kstDate.getHours());
+                const mm = pad(kstDate.getMinutes());
+                el.textContent = `Last updated: ${y}-${m}-${d} ${hh}:${mm} (KST)`;
             } catch (e) {
                 // no-op
             }
