@@ -3,6 +3,8 @@ class ScoreAnalyzer {
         this.filesData = new Map(); // 파일명 -> 분석 데이터 매핑
         this.combinedData = null; // 통합된 분석 데이터
         this.selectedFiles = null; // 사용자가 선택/드롭한 파일 목록
+        this.subjectGroups = null; // 교과(군) 매핑 데이터
+        this.loadSubjectGroups(); // 교과(군) 데이터 로드
         this.initializeEventListeners();
 
         // If the page provides preloaded analysis data, render directly
@@ -20,6 +22,118 @@ class ScoreAnalyzer {
                 console.error('PRELOADED_DATA 처리 중 오류:', e);
             }
         }
+    }
+
+    // 교과(군) 매핑 데이터 로드
+    async loadSubjectGroups() {
+        try {
+            const response = await fetch('subjectGroups.json');
+            if (response.ok) {
+                this.subjectGroups = await response.json();
+                console.log('교과(군) 매핑 데이터 로드 완료');
+            } else {
+                console.warn('subjectGroups.json 파일을 찾을 수 없습니다. 기본 매핑을 사용합니다.');
+                this.setDefaultSubjectGroups();
+            }
+        } catch (error) {
+            console.warn('교과(군) 매핑 데이터 로드 실패:', error);
+            this.setDefaultSubjectGroups();
+        }
+    }
+
+    // 기본 교과(군) 매핑 설정 (JSON 로드 실패 시)
+    setDefaultSubjectGroups() {
+        this.subjectGroups = {
+            groups: {
+                "국어": { keywords: ["국어", "화법", "독서", "문학", "언어", "작문", "매체"], color: "#e74c3c", order: 1 },
+                "수학": { keywords: ["수학", "대수", "미적분", "확률", "통계", "기하"], color: "#3498db", order: 2 },
+                "영어": { keywords: ["영어", "English"], color: "#2ecc71", order: 3 },
+                "사회": { keywords: ["사회", "역사", "지리", "윤리", "정치", "경제", "법", "세계사", "동아시아", "시민"], color: "#f39c12", order: 4 },
+                "과학": { keywords: ["과학", "물리", "화학", "생명", "지구", "탐구실험", "생물"], color: "#9b59b6", order: 5 },
+                "기타": { keywords: [], color: "#95a5a6", order: 6 }
+            },
+            exactMatch: {
+                "한국사1": "사회", "한국사2": "사회",
+                "통합사회1": "사회", "통합사회2": "사회",
+                "통합과학1": "과학", "통합과학2": "과학",
+                "정보": "기타", "기술가정": "기타", "음악": "기타", "미술": "기타", "체육": "기타"
+            }
+        };
+    }
+
+    // 과목명을 교과(군)으로 매핑
+    getSubjectGroup(subjectName) {
+        if (!this.subjectGroups) {
+            return "기타";
+        }
+
+        // 1. 정확히 일치하는 항목 먼저 확인
+        if (this.subjectGroups.exactMatch && this.subjectGroups.exactMatch[subjectName]) {
+            return this.subjectGroups.exactMatch[subjectName];
+        }
+
+        // 2. 키워드 기반 매핑
+        for (const [groupName, groupData] of Object.entries(this.subjectGroups.groups)) {
+            if (groupName === "기타") continue; // 기타는 마지막에 처리
+            for (const keyword of groupData.keywords) {
+                if (subjectName.includes(keyword)) {
+                    return groupName;
+                }
+            }
+        }
+
+        // 3. 매칭되지 않으면 기타
+        return "기타";
+    }
+
+    // 학생의 교과(군)별 평균 등급 계산
+    calculateGroupGrades(student) {
+        const groupData = {};
+
+        // 교과군별로 데이터 초기화
+        if (this.subjectGroups && this.subjectGroups.groups) {
+            for (const groupName of Object.keys(this.subjectGroups.groups)) {
+                groupData[groupName] = {
+                    totalGradePoints: 0,
+                    totalCredits: 0,
+                    subjects: []
+                };
+            }
+        }
+
+        // 각 과목을 교과군에 할당
+        this.combinedData.subjects.forEach(subject => {
+            const grade = student.grades[subject.name];
+            if (grade !== undefined && grade !== null && !isNaN(grade)) {
+                const groupName = this.getSubjectGroup(subject.name);
+                if (!groupData[groupName]) {
+                    groupData[groupName] = { totalGradePoints: 0, totalCredits: 0, subjects: [] };
+                }
+                groupData[groupName].totalGradePoints += grade * subject.credits;
+                groupData[groupName].totalCredits += subject.credits;
+                groupData[groupName].subjects.push({
+                    name: subject.name,
+                    grade: grade,
+                    credits: subject.credits
+                });
+            }
+        });
+
+        // 교과군별 평균 등급 계산
+        const result = {};
+        for (const [groupName, data] of Object.entries(groupData)) {
+            if (data.totalCredits > 0) {
+                result[groupName] = {
+                    averageGrade: data.totalGradePoints / data.totalCredits,
+                    totalCredits: data.totalCredits,
+                    subjects: data.subjects,
+                    color: this.subjectGroups?.groups?.[groupName]?.color || "#95a5a6",
+                    order: this.subjectGroups?.groups?.[groupName]?.order || 99
+                };
+            }
+        }
+
+        return result;
     }
 
     initializeEventListeners() {
@@ -238,10 +352,10 @@ class ScoreAnalyzer {
 
         // 과목별 전체 평균 계산
         subjectMap.forEach(subject => {
-            subject.average = subject.averages.length > 0 
-                ? subject.averages.reduce((sum, avg) => sum + avg, 0) / subject.averages.length 
+            subject.average = subject.averages.length > 0
+                ? subject.averages.reduce((sum, avg) => sum + avg, 0) / subject.averages.length
                 : 0;
-            
+
             // 분포도 평균 계산
             if (subject.distributions.length > 0) {
                 subject.distribution = {};
@@ -250,8 +364,8 @@ class ScoreAnalyzer {
                     const values = subject.distributions
                         .map(dist => dist[grade] || 0)
                         .filter(val => val > 0);
-                    subject.distribution[grade] = values.length > 0 
-                        ? values.reduce((sum, val) => sum + val, 0) / values.length 
+                    subject.distribution[grade] = values.length > 0
+                        ? values.reduce((sum, val) => sum + val, 0) / values.length
                         : 0;
                 });
             }
@@ -259,31 +373,75 @@ class ScoreAnalyzer {
 
         this.combinedData.subjects = Array.from(subjectMap.values());
 
-        // 모든 학생 데이터 통합
-        let studentCounter = 1;
+        // 모든 학생 데이터 통합 (같은 학년-반-번호 학생은 병합)
+        const studentMap = new Map();
+
         this.filesData.forEach((fileData, fileName) => {
             fileData.students.forEach(student => {
-                const fileNameParts = fileName.split('.')[0];
-                
-                const combinedStudent = {
-                    ...student,
-                    number: studentCounter++,
-                    originalNumber: student.number,
-                    originalName: student.name, // 원본 이름 보존
-                    fileName: fileName,
-                    name: student.name, // 실제 학생 이름 사용
-                    displayName: `${fileData.grade}학년${fileData.class}반-${student.name}`, // 표시용 이름
-                    grade: fileData.grade, // 파일의 A3 셀에서 추출한 학년
-                    class: fileData.class, // 파일의 A3 셀에서 추출한 반
-                    percentiles: {}
-                };
-                this.combinedData.students.push(combinedStudent);
+                // 학생 고유 키: 학년-반-번호 (같은 학생 식별)
+                const studentKey = `${fileData.grade}-${fileData.class}-${student.number}`;
+
+                if (!studentMap.has(studentKey)) {
+                    // 새로운 학생 생성
+                    studentMap.set(studentKey, {
+                        originalNumber: student.number,
+                        originalName: student.name,
+                        name: student.name,
+                        displayName: `${fileData.grade}학년${fileData.class}반-${student.name}`,
+                        grade: fileData.grade,
+                        class: fileData.class,
+                        fileNames: [fileName],
+                        scores: {},
+                        achievements: {},
+                        grades: {},
+                        ranks: {},
+                        subjectTotals: {},
+                        percentiles: {},
+                        totalStudents: student.totalStudents
+                    });
+                } else {
+                    // 기존 학생에 파일명 추가
+                    studentMap.get(studentKey).fileNames.push(fileName);
+                }
+
+                const combinedStudent = studentMap.get(studentKey);
+
+                // 과목별 데이터 병합 (각 파일의 과목 데이터를 추가)
+                Object.keys(student.scores || {}).forEach(subjectName => {
+                    combinedStudent.scores[subjectName] = student.scores[subjectName];
+                });
+                Object.keys(student.achievements || {}).forEach(subjectName => {
+                    combinedStudent.achievements[subjectName] = student.achievements[subjectName];
+                });
+                Object.keys(student.grades || {}).forEach(subjectName => {
+                    combinedStudent.grades[subjectName] = student.grades[subjectName];
+                });
+                Object.keys(student.ranks || {}).forEach(subjectName => {
+                    combinedStudent.ranks[subjectName] = student.ranks[subjectName];
+                });
+                Object.keys(student.subjectTotals || {}).forEach(subjectName => {
+                    combinedStudent.subjectTotals[subjectName] = student.subjectTotals[subjectName];
+                });
+
+                // 수강자수 업데이트 (최대값 사용)
+                if (student.totalStudents && (!combinedStudent.totalStudents || student.totalStudents > combinedStudent.totalStudents)) {
+                    combinedStudent.totalStudents = student.totalStudents;
+                }
             });
+        });
+
+        // Map을 배열로 변환하고 번호 할당
+        let studentCounter = 1;
+        studentMap.forEach((student, key) => {
+            student.number = studentCounter++;
+            // 병합 후 가중평균등급 재계산
+            student.weightedAverageGrade = this.calculateWeightedAverageGrade(student, this.combinedData.subjects);
+            this.combinedData.students.push(student);
         });
 
         // 과목별 백분위 계산
         this.calculatePercentiles();
-        
+
         // 평균등급 기준 순위 계산
         this.calculateAverageGradeRanks();
     }
@@ -2367,7 +2525,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                         
                         <div class="chart-container">
-                            <h4>과목별 등급</h4>
+                            <h4>교과(군)별 평균등급</h4>
                             <canvas id="studentPercentileChart" width="400" height="400"></canvas>
                         </div>
                     </div>
@@ -2461,7 +2619,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                             
                             <div class="chart-container">
-                                <h4>과목별 등급</h4>
+                                <h4>교과(군)별 평균등급</h4>
                                 <canvas id="${canvasId}" width="400" height="400"></canvas>
                             </div>
                         </div>
@@ -2478,39 +2636,44 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
-    // 다중 생성용 차트 (개별 PDF와 동일한 설정)
+    // 다중 생성용 차트 (교과군별 - PDF용)
     createStudentPercentileChartFor(canvas, student) {
         if (!canvas) return null;
-        const subjects = this.combinedData.subjects.filter(subject => {
-            const grade = student.grades[subject.name];
-            return grade !== undefined && grade !== null && grade !== 'N/A' && !isNaN(grade);
-        });
-        if (subjects.length === 0) return null;
-        const labels = subjects.map(subject => subject.name);
-        const gradeData = subjects.map(subject => {
-            const grade = student.grades[subject.name];
-            return grade ? (6 - grade) : 0;
-        });
+
+        // 교과군별 평균 등급 계산
+        const groupGrades = this.calculateGroupGrades(student);
+        if (Object.keys(groupGrades).length === 0) return null;
+
+        // order 순으로 정렬
+        const sortedGroups = Object.entries(groupGrades)
+            .sort((a, b) => a[1].order - b[1].order);
+
+        const labels = sortedGroups.map(([name]) => name);
+        const gradeData = sortedGroups.map(([name, data]) => 6 - data.averageGrade);
+        const colors = sortedGroups.map(([name, data]) => data.color);
+        const originalGrades = sortedGroups.map(([name, data]) => data.averageGrade);
+
         // 기존 차트 인스턴스가 해당 캔버스에 남아있다면 파괴
         try {
             const existing = (Chart.getChart ? Chart.getChart(canvas) : (canvas && (canvas._chart || canvas.chart)));
             if (existing && typeof existing.destroy === 'function') existing.destroy();
         } catch (_) {}
+
         return new Chart(canvas, {
             type: 'radar',
             plugins: [ChartDataLabels],
             data: {
                 labels,
                 datasets: [{
-                    label: '등급',
+                    label: '교과군별 평균등급',
                     data: gradeData,
                     backgroundColor: 'rgba(52, 152, 219, 0.2)',
                     borderColor: 'rgba(52, 152, 219, 1)',
                     borderWidth: 2,
-                    pointBackgroundColor: 'rgba(52, 152, 219, 1)',
+                    pointBackgroundColor: colors,
                     pointBorderColor: '#fff',
                     pointBorderWidth: 2,
-                    pointRadius: 6
+                    pointRadius: 8
                 }]
             },
             options: {
@@ -2532,20 +2695,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     datalabels: {
                         display: true,
                         formatter: function(value, context) {
-                            const subjectIndex = context.dataIndex;
-                            const subject = subjects[subjectIndex];
-                            const grade = student.grades[subject.name];
-                            return `${grade}등급`;
+                            const idx = context.dataIndex;
+                            return originalGrades[idx].toFixed(2) + '등급';
                         },
                         color: '#2c3e50',
                         backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                        borderColor: '#dee2e6',
-                        borderWidth: 1,
-                        borderRadius: 4,
-                        padding: 4,
+                        borderColor: function(context) {
+                            return colors[context.dataIndex];
+                        },
+                        borderWidth: 2,
+                        borderRadius: 6,
+                        padding: 6,
                         font: {
                             size: 11,
-                            weight: '500'
+                            weight: 'bold'
                         }
                     }
                 },
@@ -2570,10 +2733,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         },
                         pointLabels: {
                             font: {
-                                size: 12,
-                                weight: '500'
+                                size: 13,
+                                weight: '600'
                             },
-                            color: '#2c3e50'
+                            color: function(context) {
+                                return colors[context.index] || '#2c3e50';
+                            }
                         }
                     }
                 }
@@ -2788,138 +2953,178 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     renderSubjectCards(student) {
-        return this.combinedData.subjects.map(subject => {
-            const score = student.scores[subject.name] || 0;
-            const achievement = student.achievements[subject.name] || 'N/A';
-            const grade = student.grades ? student.grades[subject.name] : undefined;
-            const rank = student.ranks ? student.ranks[subject.name] || 'N/A' : 'N/A';
-            // 퍼센타일 기본값을 0으로 두지 않고, 없으면 null 처리
-            const percentile = student.percentiles && Object.prototype.hasOwnProperty.call(student.percentiles, subject.name)
-                ? student.percentiles[subject.name]
-                : null;
-            
-            // 등급이 있는지 확인
-            const hasGrade = grade !== undefined && grade !== null && grade !== 'N/A' && !isNaN(grade);
-            
-            // 백분위에 따른 색상 결정 (등급이 있는 경우만)
-            let percentileClass = 'low';
-            if (hasGrade && percentile !== null && percentile >= 80) percentileClass = 'excellent';
-            else if (hasGrade && percentile !== null && percentile >= 60) percentileClass = 'good';
-            else if (hasGrade && percentile !== null && percentile >= 40) percentileClass = 'average';
-            
-            if (hasGrade) {
-                // 등급이 있는 과목: 모든 정보 표시
-                return `
-                    <div class="subject-card">
-                        <div class="subject-header">
-                            <h5>${subject.name}</h5>
-                            <span class="credits">${subject.credits}학점</span>
-                        </div>
-                        <div class="subject-metrics">
-                            <div class="metric">
-                                <span class="metric-label">점수</span>
-                                <span class="metric-value">${score}점</span>
-                                <span class="metric-average">(평균: ${subject.average ? subject.average.toFixed(1) : 'N/A'}점)</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">성취도</span>
-                                <span class="metric-value achievement ${achievement}">${achievement}</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">등급</span>
-                                <span class="metric-value">${grade}등급</span>
-                            </div>
-                        </div>
-                        <div class="subject-metrics">
-                            <div class="metric">
-                                <span class="metric-label">석차</span>
-                                <span class="metric-value">${rank}위</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">백분위</span>
-                                <span class="metric-value percentile ${percentileClass}">${percentile !== null ? percentile + '%' : 'N/A'}</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">등급(9등급환산)</span>
-                                <span class="metric-value orange">${percentile !== null ? (this.convertPercentileTo9Grade(percentile) || 'N/A') + '등급' : 'N/A'}</span>
-                            </div>
-                        </div>
-                        <div class="percentile-bar">
-                            <div class="percentile-fill ${percentileClass}" style="width: ${percentile !== null ? percentile : 0}%"></div>
-                        </div>
-                    </div>
-                `;
-            } else {
-                // 등급이 없는 과목: 점수, 평균, 성취도만 표시
-                return `
-                    <div class="subject-card no-grade">
-                        <div class="subject-header">
-                            <h5>${subject.name}</h5>
-                            <span class="credits">${subject.credits}학점</span>
-                        </div>
-                        <div class="subject-metrics simple">
-                            <div class="metric">
-                                <span class="metric-label">점수</span>
-                                <span class="metric-value">${score}점</span>
-                                <span class="metric-average">(평균: ${subject.average ? subject.average.toFixed(1) : 'N/A'}점)</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">성취도</span>
-                                <span class="metric-value achievement ${achievement}">${achievement}</span>
-                            </div>
-                        </div>
-                        <div class="no-grade-notice">
-                            <span>등급 산출 대상 과목이 아닙니다</span>
-                        </div>
-                    </div>
-                `;
+        // 과목을 교과군별로 그룹화
+        const groupedSubjects = {};
+        const groupOrder = this.subjectGroups?.groups || {};
+
+        this.combinedData.subjects.forEach(subject => {
+            const groupName = this.getSubjectGroup(subject.name);
+            if (!groupedSubjects[groupName]) {
+                groupedSubjects[groupName] = {
+                    subjects: [],
+                    order: groupOrder[groupName]?.order || 99,
+                    color: groupOrder[groupName]?.color || '#95a5a6'
+                };
             }
+            groupedSubjects[groupName].subjects.push(subject);
+        });
+
+        // 교과군 순서대로 정렬
+        const sortedGroups = Object.entries(groupedSubjects)
+            .sort((a, b) => a[1].order - b[1].order);
+
+        // 교과군별로 섹션 생성
+        return sortedGroups.map(([groupName, groupData]) => {
+            const subjectCards = groupData.subjects.map(subject => {
+                return this.renderSingleSubjectCard(student, subject);
+            }).join('');
+
+            return `
+                <div class="subject-group-section">
+                    <div class="subject-group-header" style="border-left: 4px solid ${groupData.color}">
+                        <h5>${groupName}</h5>
+                        <span class="subject-count">${groupData.subjects.length}과목</span>
+                    </div>
+                    <div class="subject-group-cards">
+                        ${subjectCards}
+                    </div>
+                </div>
+            `;
         }).join('');
+    }
+
+    // 개별 과목 카드 렌더링
+    renderSingleSubjectCard(student, subject) {
+        const score = student.scores[subject.name] || 0;
+        const achievement = student.achievements[subject.name] || 'N/A';
+        const grade = student.grades ? student.grades[subject.name] : undefined;
+        const rank = student.ranks ? student.ranks[subject.name] || 'N/A' : 'N/A';
+        const percentile = student.percentiles && Object.prototype.hasOwnProperty.call(student.percentiles, subject.name)
+            ? student.percentiles[subject.name]
+            : null;
+
+        const hasGrade = grade !== undefined && grade !== null && grade !== 'N/A' && !isNaN(grade);
+
+        let percentileClass = 'low';
+        if (hasGrade && percentile !== null && percentile >= 80) percentileClass = 'excellent';
+        else if (hasGrade && percentile !== null && percentile >= 60) percentileClass = 'good';
+        else if (hasGrade && percentile !== null && percentile >= 40) percentileClass = 'average';
+
+        if (hasGrade) {
+            return `
+                <div class="subject-card">
+                    <div class="subject-header">
+                        <h5>${subject.name}</h5>
+                        <span class="credits">${subject.credits}학점</span>
+                    </div>
+                    <div class="subject-metrics">
+                        <div class="metric">
+                            <span class="metric-label">점수</span>
+                            <span class="metric-value">${score}점</span>
+                            <span class="metric-average">(평균: ${subject.average ? subject.average.toFixed(1) : 'N/A'}점)</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">성취도</span>
+                            <span class="metric-value achievement ${achievement}">${achievement}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">등급</span>
+                            <span class="metric-value">${grade}등급</span>
+                        </div>
+                    </div>
+                    <div class="subject-metrics">
+                        <div class="metric">
+                            <span class="metric-label">석차</span>
+                            <span class="metric-value">${rank}위</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">백분위</span>
+                            <span class="metric-value percentile ${percentileClass}">${percentile !== null ? percentile + '%' : 'N/A'}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">등급(9등급환산)</span>
+                            <span class="metric-value orange">${percentile !== null ? (this.convertPercentileTo9Grade(percentile) || 'N/A') + '등급' : 'N/A'}</span>
+                        </div>
+                    </div>
+                    <div class="percentile-bar">
+                        <div class="percentile-fill ${percentileClass}" style="width: ${percentile !== null ? percentile : 0}%"></div>
+                    </div>
+                </div>
+            `;
+        } else {
+            return `
+                <div class="subject-card no-grade">
+                    <div class="subject-header">
+                        <h5>${subject.name}</h5>
+                        <span class="credits">${subject.credits}학점</span>
+                    </div>
+                    <div class="subject-metrics simple">
+                        <div class="metric">
+                            <span class="metric-label">점수</span>
+                            <span class="metric-value">${score}점</span>
+                            <span class="metric-average">(평균: ${subject.average ? subject.average.toFixed(1) : 'N/A'}점)</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">성취도</span>
+                            <span class="metric-value achievement ${achievement}">${achievement}</span>
+                        </div>
+                    </div>
+                    <div class="no-grade-notice">
+                        <span>등급 산출 대상 과목이 아닙니다</span>
+                    </div>
+                </div>
+            `;
+        }
     }
 
     createStudentPercentileChart(student) {
         const ctx = document.getElementById('studentPercentileChart');
         if (!ctx) return;
-        
+
         // 기존 차트 제거
         if (this.studentPercentileChart) {
             this.studentPercentileChart.destroy();
         }
 
-        // 등급이 있는 과목만 필터링
-        const subjects = this.combinedData.subjects.filter(subject => {
-            const grade = student.grades[subject.name];
-            return grade !== undefined && grade !== null && grade !== 'N/A' && !isNaN(grade);
-        });
+        // 교과군별 평균 등급 계산
+        const groupGrades = this.calculateGroupGrades(student);
 
-        if (subjects.length === 0) {
+        // 데이터가 없으면 차트 숨김
+        if (Object.keys(groupGrades).length === 0) {
             ctx.parentElement.style.display = 'none';
             return;
         }
 
         ctx.parentElement.style.display = 'block';
-        const labels = subjects.map(subject => subject.name);
-        const gradeData = subjects.map(subject => {
-            const grade = student.grades[subject.name];
+
+        // order 순으로 정렬
+        const sortedGroups = Object.entries(groupGrades)
+            .sort((a, b) => a[1].order - b[1].order);
+
+        const labels = sortedGroups.map(([name, data]) => name);
+        const gradeData = sortedGroups.map(([name, data]) => {
             // 등급을 역순으로 변환 (1등급=5, 2등급=4, ..., 5등급=1)하여 차트에서 높게 표시
-            return grade ? (6 - grade) : 0;
+            return 6 - data.averageGrade;
         });
-        
+        const colors = sortedGroups.map(([name, data]) => data.color);
+        const originalGrades = sortedGroups.map(([name, data]) => data.averageGrade);
+        const subjectDetails = sortedGroups.map(([name, data]) => data.subjects);
+
         this.studentPercentileChart = new Chart(ctx, {
             type: 'radar',
             plugins: [ChartDataLabels],
             data: {
                 labels: labels,
                 datasets: [{
-                    label: '등급',
+                    label: '교과군별 평균등급',
                     data: gradeData,
                     backgroundColor: 'rgba(52, 152, 219, 0.2)',
                     borderColor: 'rgba(52, 152, 219, 1)',
                     borderWidth: 2,
-                    pointBackgroundColor: 'rgba(52, 152, 219, 1)',
+                    pointBackgroundColor: colors,
                     pointBorderColor: '#fff',
                     pointBorderWidth: 2,
-                    pointRadius: 6
+                    pointRadius: 8
                 }]
             },
             options: {
@@ -2937,40 +3142,54 @@ document.addEventListener('DOMContentLoaded', () => {
                         titleColor: '#ffffff',
                         bodyColor: '#ffffff',
                         callbacks: {
+                            title: function(context) {
+                                return context[0].label + ' 교과(군)';
+                            },
                             label: function(context) {
-                                const subjectName = context.label;
-                                const gradeValue = context.parsed.r;
-                                // 역순으로 변환된 값을 다시 등급으로 변환
-                                const grade = gradeValue > 0 ? (6 - gradeValue) : 'N/A';
-                                return `${grade}등급`;
+                                const idx = context.dataIndex;
+                                const avgGrade = originalGrades[idx];
+                                return `평균 등급: ${avgGrade.toFixed(2)}등급`;
+                            },
+                            afterLabel: function(context) {
+                                const idx = context.dataIndex;
+                                const subjects = subjectDetails[idx];
+                                if (subjects && subjects.length > 0) {
+                                    const lines = ['포함 과목:'];
+                                    subjects.forEach(s => {
+                                        lines.push(`  ${s.name}: ${s.grade}등급 (${s.credits}학점)`);
+                                    });
+                                    return lines;
+                                }
+                                return '';
                             }
                         }
                     },
                     datalabels: {
                         display: true,
                         color: '#2c3e50',
-                        backgroundColor: 'rgba(255, 255, 255, 0.8)',
-                        borderColor: '#dee2e6',
-                        borderWidth: 1,
-                        borderRadius: 4,
+                        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                        borderColor: function(context) {
+                            return colors[context.dataIndex];
+                        },
+                        borderWidth: 2,
+                        borderRadius: 6,
                         padding: {
-                            top: 4,
-                            bottom: 4,
-                            left: 6,
-                            right: 6
+                            top: 6,
+                            bottom: 6,
+                            left: 8,
+                            right: 8
                         },
                         font: {
-                            size: 11,
+                            size: 12,
                             weight: 'bold'
                         },
                         formatter: function(value, context) {
-                            const subjectIndex = context.dataIndex;
-                            const grade = subjects[subjectIndex] ? student.grades[subjects[subjectIndex].name] : 'N/A';
-                            return `${grade}등급`;
+                            const idx = context.dataIndex;
+                            return originalGrades[idx].toFixed(2) + '등급';
                         },
                         anchor: 'end',
                         align: 'top',
-                        offset: 10,
+                        offset: 12,
                         textAlign: 'center'
                     }
                 },
@@ -2999,10 +3218,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         },
                         pointLabels: {
                             font: {
-                                size: 12,
-                                weight: '500'
+                                size: 14,
+                                weight: '600'
                             },
-                            color: '#2c3e50'
+                            color: function(context) {
+                                return colors[context.index] || '#2c3e50';
+                            }
                         }
                     }
                 }
@@ -4142,11 +4363,11 @@ class StandaloneScoreAnalyzer {
                     </div>
                     
                     <div class="chart-container">
-                        <h4>과목별 등급</h4>
+                        <h4>교과(군)별 평균등급</h4>
                         <canvas id="studentPercentileChart" width="400" height="400"></canvas>
                     </div>
                 </div>
-                
+
                 <div class="subject-details">
                     <h4>과목별 상세 분석</h4>
                     <div class="subject-cards">

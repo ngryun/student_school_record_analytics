@@ -1343,10 +1343,48 @@ header p {
 }
 
 .subject-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+    max-height: none;
+}
+
+/* 교과(군)별 섹션 스타일 */
+.subject-group-section {
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 20px;
+}
+
+.subject-group-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 15px;
+    background: white;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.subject-group-header h5 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.subject-group-header .subject-count {
+    font-size: 0.85rem;
+    color: #6c757d;
+    background: #e9ecef;
+    padding: 3px 10px;
+    border-radius: 12px;
+}
+
+.subject-group-cards {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-    gap: 20px;
-    max-height: none;
+    gap: 15px;
 }
 
 .subject-card.no-grade {
