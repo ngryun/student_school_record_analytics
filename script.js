@@ -401,7 +401,9 @@ class ScoreAnalyzer {
                         ranks: {},
                         subjectTotals: {},
                         percentiles: {},
-                        totalStudents: student.totalStudents
+                        totalStudents: student.totalStudents,
+                        hasGradeReportSource: fileData.format === 'grade-report',
+                        hasXlsDataSource: fileData.format !== 'grade-report'
                     });
                 } else {
                     // 기존 학생에 파일명 추가
@@ -409,6 +411,8 @@ class ScoreAnalyzer {
                 }
 
                 const combinedStudent = studentMap.get(studentKey);
+                combinedStudent.hasGradeReportSource = combinedStudent.hasGradeReportSource || fileData.format === 'grade-report';
+                combinedStudent.hasXlsDataSource = combinedStudent.hasXlsDataSource || fileData.format !== 'grade-report';
 
                 // 과목별 데이터 병합 (각 파일의 과목 데이터를 추가)
                 Object.keys(student.scores || {}).forEach(subjectName => {
@@ -547,7 +551,7 @@ class ScoreAnalyzer {
             }
             
             // 9등급 환산 평균 계산 (기존 데이터에 없는 경우)
-            if (!student.weightedAverage9Grade) {
+            if (student.weightedAverage9Grade === null || student.weightedAverage9Grade === undefined) {
                 student.weightedAverage9Grade = this.calculateWeightedAverage9Grade(student, this.combinedData.subjects);
             }
         });
@@ -574,13 +578,20 @@ class ScoreAnalyzer {
     }
 
     parseFileData(data, fileName) {
+        const format = this.detectFileFormat(data);
+        if (format === 'grade-report') {
+            console.log(`[${fileName}] 인쇄용 성적표 양식 감지`);
+            return this.parseGradeReport(data, fileName);
+        }
+
         const fileData = {
             fileName: fileName,
             data: data,
             subjects: [],
             students: [],
             grade: 1,
-            class: 1
+            class: 1,
+            format: 'xls-data'
         };
 
         // A3 셀에서 학년/반 정보 추출 (0-based index로는 행 2, 열 0)
@@ -659,6 +670,404 @@ class ScoreAnalyzer {
         });
     }
 
+    detectFileFormat(data) {
+        if (!data || data.length < 5) return 'xls-data';
+
+        const row4 = data[3];
+        if (!row4 || row4.length < 4) return 'xls-data';
+
+        const knownHeaders = [
+            '번호', '성명', '학년', '학기', '교과',
+            '과목명', '과목', '학점', '단위수',
+            '석차등급', '수강자수', '성취도', '원점수'
+        ];
+        let matchCount = 0;
+
+        for (let c = 0; c < Math.min(row4.length, 20); c++) {
+            const cell = String(row4[c] || '').replace(/\s+/g, '').trim();
+            if (knownHeaders.some(header => cell.includes(header))) {
+                matchCount++;
+            }
+        }
+
+        if (matchCount >= 4) return 'grade-report';
+
+        for (let c = 3; c < row4.length; c++) {
+            const cell = String(row4[c] || '').trim();
+            if (/^.+\(\d+\)$/.test(cell)) {
+                return 'xls-data';
+            }
+        }
+
+        return 'xls-data';
+    }
+
+    parseGradeReport(data, fileName) {
+        const fileData = {
+            fileName: fileName,
+            data: data,
+            subjects: [],
+            students: [],
+            grade: 1,
+            class: 1,
+            format: 'grade-report'
+        };
+
+        if (data[2] && data[2][0]) {
+            const info = String(data[2][0]);
+            const gradeMatches = info.match(/(\d+)\s*학년/g);
+            if (gradeMatches) {
+                const lastMatch = gradeMatches[gradeMatches.length - 1];
+                const gradeMatch = lastMatch.match(/(\d+)/);
+                if (gradeMatch) {
+                    const parsedGrade = parseInt(gradeMatch[1], 10);
+                    if (parsedGrade < 10) fileData.grade = parsedGrade;
+                }
+            }
+
+            const classMatch = info.match(/(\d+)\s*반/);
+            if (classMatch) {
+                fileData.class = parseInt(classMatch[1], 10);
+            }
+
+            console.log(`[인쇄용 양식] ${fileData.grade}학년 ${fileData.class}반 감지`);
+        }
+
+        const headerRow = data[3] || [];
+        const colMap = this._buildGradeReportColumnMap(headerRow);
+        console.log('[인쇄용 양식] 열 매핑:', JSON.stringify(colMap));
+
+        let curNumber = null;
+        let curName = null;
+        let curSchoolYear = null;
+        let curSemester = null;
+        let is예체능 = false;
+        let is진로선택 = false;
+
+        const subjectMap = new Map();
+        const studentMap = new Map();
+        const subjectOrder = [];
+
+        for (let i = 4; i < data.length; i++) {
+            const row = data[i];
+            if (!row || row.length === 0) continue;
+
+            const cellA = String(row[0] || '').trim();
+
+            if (cellA.includes('체육') && (cellA.includes('예술') || cellA.includes('과학탐구실험'))) {
+                is예체능 = true;
+                continue;
+            }
+            if (cellA.includes('진로') && cellA.includes('선택')) {
+                is진로선택 = true;
+                continue;
+            }
+            if (cellA.startsWith('<') && !cellA.includes('체육') && !cellA.includes('진로')) {
+                // 섹션 구분선은 그대로 건너뛴다.
+                continue;
+            }
+
+            if (this._isGradeReportHeaderRow(row, colMap)) continue;
+
+            const subjectName = this._grVal(row, colMap, 'subjectName');
+            const creditsRaw = this._grVal(row, colMap, 'credits');
+            if (!subjectName || String(subjectName).trim() === '') continue;
+
+            const credits = parseFloat(creditsRaw);
+            if (isNaN(credits)) continue;
+
+            const numVal = this._grVal(row, colMap, 'number');
+            if (numVal !== undefined && numVal !== null && numVal !== '') {
+                const parsedNumber = parseInt(numVal, 10);
+                if (!isNaN(parsedNumber)) {
+                    curNumber = parsedNumber;
+                    const nameVal = this._grVal(row, colMap, 'name');
+                    if (nameVal && String(nameVal).trim() !== '') {
+                        curName = String(nameVal).trim();
+                    }
+                }
+            }
+
+            const yearVal = this._grVal(row, colMap, 'schoolYear');
+            if (yearVal !== undefined && yearVal !== null && yearVal !== '') {
+                const parsedYear = parseInt(yearVal, 10);
+                if (!isNaN(parsedYear)) curSchoolYear = parsedYear;
+            }
+
+            const semVal = this._grVal(row, colMap, 'semester');
+            if (semVal !== undefined && semVal !== null && semVal !== '') {
+                const parsedSemester = parseInt(semVal, 10);
+                if (!isNaN(parsedSemester)) curSemester = parsedSemester;
+            }
+
+            if (curNumber === null) continue;
+
+            const subName = String(subjectName).trim();
+            const subjectGroup = String(this._grVal(row, colMap, 'subjectGroup') || '').trim();
+
+            let rawScore = null;
+            let subjectAvg = 0;
+            const rawScoreCell = this._grVal(row, colMap, 'rawScore');
+            const avgCell = this._grVal(row, colMap, 'subjectAvg');
+
+            if (rawScoreCell !== undefined && rawScoreCell !== null && rawScoreCell !== '') {
+                const rawStr = String(rawScoreCell).trim();
+                if (rawStr.includes('/')) {
+                    const parts = rawStr.split('/');
+                    const parsedRawScore = parseFloat(parts[0]);
+                    rawScore = isNaN(parsedRawScore) ? null : parsedRawScore;
+                    if (parts[1]) {
+                        subjectAvg = parseFloat(parts[1].split('(')[0]) || 0;
+                    }
+                } else {
+                    const parsedRawScore = parseFloat(rawStr);
+                    rawScore = isNaN(parsedRawScore) ? null : parsedRawScore;
+                }
+            }
+
+            if (avgCell !== undefined && avgCell !== null && avgCell !== '' && subjectAvg === 0) {
+                subjectAvg = parseFloat(avgCell) || 0;
+            }
+
+            let achievement = '';
+            if (is예체능 && colMap.achievement !== undefined) {
+                const achVal = this._grVal(row, colMap, 'achievement');
+                achievement = this._normalizeAchievementValue(achVal);
+                if (!achievement && colMap.achievement > 0) {
+                    achievement = this._normalizeAchievementValue(row[colMap.achievement - 1]);
+                }
+            } else {
+                achievement = this._normalizeAchievementValue(this._grVal(row, colMap, 'achievement'));
+            }
+
+            let gradeRank = NaN;
+            if (!is예체능) {
+                const gradeRankRaw = this._grVal(row, colMap, 'gradeRank');
+                if (gradeRankRaw !== undefined && gradeRankRaw !== null && gradeRankRaw !== '') {
+                    const gradeMatch = String(gradeRankRaw).trim().match(/\d+/);
+                    if (gradeMatch) gradeRank = parseInt(gradeMatch[0], 10);
+                }
+            }
+
+            let totalStudents = NaN;
+            if (!is예체능) {
+                const totalRaw = this._grVal(row, colMap, 'totalStudents');
+                if (totalRaw !== undefined && totalRaw !== null && totalRaw !== '') {
+                    const totalMatch = String(totalRaw).trim().match(/\d+/);
+                    if (totalMatch) totalStudents = parseInt(totalMatch[0], 10);
+                }
+            }
+
+            const distRaw = this._grVal(row, colMap, 'achievementDist');
+
+            if (!subjectMap.has(subName)) {
+                subjectMap.set(subName, {
+                    name: subName,
+                    credits: credits,
+                    averages: [],
+                    rawDistributions: [],
+                    group: subjectGroup,
+                    isCareerTrack: is진로선택,
+                    schoolYear: curSchoolYear,
+                    semester: curSemester
+                });
+                subjectOrder.push(subName);
+            }
+
+            const subjectInfo = subjectMap.get(subName);
+            if (subjectAvg > 0) subjectInfo.averages.push(subjectAvg);
+            if (distRaw && String(distRaw).trim() !== '') {
+                subjectInfo.rawDistributions.push(String(distRaw).trim());
+            }
+
+            if (!studentMap.has(curNumber)) {
+                studentMap.set(curNumber, {
+                    number: curNumber,
+                    name: curName || `학생${curNumber}`,
+                    scores: {},
+                    achievements: {},
+                    grades: {},
+                    ranks: {},
+                    subjectTotals: {},
+                    percentiles: {},
+                    totalStudents: null,
+                    sourceFormat: fileData.format,
+                    hasGradeReportSource: true,
+                    hasXlsDataSource: false
+                });
+            }
+
+            const student = studentMap.get(curNumber);
+            if (curName && curName !== `학생${curNumber}`) {
+                student.name = curName;
+            }
+
+            if (rawScore !== null) {
+                student.scores[subName] = rawScore;
+            }
+            if (achievement) student.achievements[subName] = achievement;
+
+            if (!is예체능) {
+                if (!isNaN(gradeRank)) student.grades[subName] = gradeRank;
+                if (!isNaN(totalStudents)) {
+                    student.subjectTotals[subName] = totalStudents;
+                    if (!student.totalStudents || totalStudents > student.totalStudents) {
+                        student.totalStudents = totalStudents;
+                    }
+                }
+            }
+        }
+
+        subjectOrder.forEach((subName, idx) => {
+            const info = subjectMap.get(subName);
+            const subject = {
+                name: info.name,
+                credits: info.credits,
+                columnIndex: idx,
+                average: info.averages.length > 0
+                    ? info.averages.reduce((sum, value) => sum + value, 0) / info.averages.length
+                    : 0,
+                scores: []
+            };
+
+            if (info.rawDistributions.length > 0) {
+                subject.distribution = this._parseAchievementDistString(info.rawDistributions[0]);
+            }
+
+            fileData.subjects.push(subject);
+        });
+
+        studentMap.forEach(student => {
+            student.weightedAverageGrade = this.calculateWeightedAverageGrade(student, fileData.subjects);
+            student.weightedAverage9Grade = this.calculateWeightedAverage9Grade(student, fileData.subjects);
+            fileData.students.push(student);
+        });
+
+        console.log(`[인쇄용 양식] 과목 ${fileData.subjects.length}개, 학생 ${fileData.students.length}명 파싱 완료`);
+        return fileData;
+    }
+
+    _buildGradeReportColumnMap(headerRow) {
+        const colMap = {};
+        const nameMap = [
+            { keys: ['번호'], field: 'number' },
+            { keys: ['성명', '이름'], field: 'name' },
+            { keys: ['학년'], field: 'schoolYear' },
+            { keys: ['학기'], field: 'semester' },
+            { keys: ['교과'], field: 'subjectGroup' },
+            { keys: ['과목명', '과목'], field: 'subjectName' },
+            { keys: ['학점', '단위수', '단위'], field: 'credits' },
+            { keys: ['원점수'], field: 'rawScore' },
+            { keys: ['과목평균'], field: 'subjectAvg' },
+            { keys: ['석차등급'], field: 'gradeRank' },
+            { keys: ['수강자수'], field: 'totalStudents' },
+            { keys: ['성취도별분포비율', '성취도별 분포비율', '분포비율'], field: 'achievementDist' }
+        ];
+
+        for (let c = 0; c < headerRow.length; c++) {
+            const raw = String(headerRow[c] || '').replace(/\s+/g, '').trim();
+            if (!raw) continue;
+
+            for (const mapping of nameMap) {
+                if (colMap[mapping.field] !== undefined) continue;
+                for (const key of mapping.keys) {
+                    if (raw === key.replace(/\s+/g, '')) {
+                        colMap[mapping.field] = c;
+                        break;
+                    }
+                }
+            }
+        }
+
+        for (let c = 0; c < headerRow.length; c++) {
+            const raw = String(headerRow[c] || '').replace(/\s+/g, '').trim();
+            if (!raw) continue;
+
+            for (const mapping of nameMap) {
+                if (colMap[mapping.field] !== undefined) continue;
+                for (const key of mapping.keys) {
+                    if (raw.includes(key.replace(/\s+/g, ''))) {
+                        colMap[mapping.field] = c;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (colMap.achievement === undefined) {
+            for (let c = 0; c < headerRow.length; c++) {
+                const raw = String(headerRow[c] || '').replace(/\s+/g, '').trim();
+                if (raw.includes('성취도') && !raw.includes('분포') && !raw.includes('비율')) {
+                    colMap.achievement = c;
+                    break;
+                }
+            }
+        }
+
+        if (colMap.subjectAvg === undefined) {
+            for (let c = 0; c < headerRow.length; c++) {
+                const raw = String(headerRow[c] || '').replace(/\s+/g, '').trim();
+                if (raw === '평균' && c !== colMap.rawScore) {
+                    colMap.subjectAvg = c;
+                    break;
+                }
+            }
+        }
+
+        if (colMap.rawScore === undefined && colMap.credits !== undefined) {
+            colMap.rawScore = colMap.credits + 1;
+        }
+
+        return colMap;
+    }
+
+    _isGradeReportHeaderRow(row, colMap) {
+        const cellA = String(row[0] || '').trim();
+        if (cellA === '번호') return true;
+
+        if (colMap.subjectName !== undefined) {
+            const subjectName = String(row[colMap.subjectName] || '').trim();
+            if (subjectName === '과목명' || subjectName === '과목') return true;
+        }
+
+        if (colMap.credits !== undefined) {
+            const credits = String(row[colMap.credits] || '').trim();
+            if (credits === '학점' || credits === '단위수') return true;
+        }
+
+        return false;
+    }
+
+    _grVal(row, colMap, field) {
+        if (colMap[field] === undefined) return undefined;
+        return row[colMap[field]];
+    }
+
+    _parseAchievementDistString(str) {
+        const distribution = {};
+        if (!str) return distribution;
+
+        const matches = str.match(/[ABCDE]\s*\(\s*\d+\.?\d*\s*\)/g);
+        if (matches) {
+            matches.forEach(match => {
+                const parsed = match.match(/([ABCDE])\s*\(\s*(\d+\.?\d*)\s*\)/);
+                if (parsed) distribution[parsed[1]] = parseFloat(parsed[2]);
+            });
+        }
+
+        return distribution;
+    }
+
+    _normalizeAchievementValue(value) {
+        if (value === undefined || value === null) return '';
+
+        const normalized = String(value).trim();
+        if (!normalized || normalized.includes('전입')) return '';
+
+        const match = normalized.match(/^[ABCDE]/);
+        return match ? match[0] : '';
+    }
+
     parseStudentData(data, fileData) {
         // 학생 데이터는 행 7부터 시작해서 각 학생마다 5행씩 사용
         // 행 7: 번호 + 합계(원점수)
@@ -699,14 +1108,17 @@ class ScoreAnalyzer {
                 achievements: {},
                 grades: {},
                 ranks: {},
+                subjectTotals: {},
+                percentiles: {},
+                sourceFormat: fileData.format,
+                hasGradeReportSource: fileData.format === 'grade-report',
+                hasXlsDataSource: fileData.format !== 'grade-report',
                 totalStudents: null
             };
 
             // 각 과목별 데이터 추출
             fileData.subjects.forEach(subject => {
                 const colIndex = subject.columnIndex;
-                // 과목별 수강자수 저장을 위해 초기화
-                if (!student.subjectTotals) student.subjectTotals = {};
                 
                 // 점수 (원점수 추출)
                 if (scoreRow[colIndex]) {
@@ -821,10 +1233,75 @@ class ScoreAnalyzer {
         return 9;                        // 하위 4%
     }
 
+    getBusanGradeAverageToNineGradeTable() {
+        return [
+            { grade5: 1.08, grade9: 1.59 },
+            { grade5: 1.16, grade9: 1.78 },
+            { grade5: 1.24, grade9: 1.98 },
+            { grade5: 1.33, grade9: 2.14 },
+            { grade5: 1.42, grade9: 2.32 },
+            { grade5: 1.50, grade9: 2.45 },
+            { grade5: 1.66, grade9: 2.72 },
+            { grade5: 1.83, grade9: 3.03 },
+            { grade5: 2.00, grade9: 3.35 },
+            { grade5: 2.16, grade9: 3.60 },
+            { grade5: 2.33, grade9: 3.91 },
+            { grade5: 2.50, grade9: 4.20 },
+            { grade5: 2.66, grade9: 4.46 },
+            { grade5: 2.83, grade9: 4.73 },
+            { grade5: 3.00, grade9: 5.03 },
+            { grade5: 3.16, grade9: 5.28 },
+            { grade5: 3.33, grade9: 5.58 },
+            { grade5: 3.50, grade9: 5.86 },
+            { grade5: 3.66, grade9: 6.08 },
+            { grade5: 3.83, grade9: 6.37 },
+            { grade5: 4.00, grade9: 6.67 },
+            { grade5: 4.16, grade9: 6.93 },
+            { grade5: 4.33, grade9: 7.20 },
+            { grade5: 4.50, grade9: 7.48 },
+            { grade5: 4.66, grade9: 7.71 },
+            { grade5: 4.83, grade9: 8.00 },
+            { grade5: 5.00, grade9: 9.00 }
+        ];
+    }
+
+    estimateNineGradeAverageFromFiveGradeAverage(gradeAverage) {
+        if (gradeAverage === null || gradeAverage === undefined || isNaN(gradeAverage)) {
+            return null;
+        }
+
+        const table = this.getBusanGradeAverageToNineGradeTable();
+        if (table.length === 0) return null;
+
+        if (gradeAverage <= table[0].grade5) {
+            return table[0].grade9;
+        }
+
+        const lastPoint = table[table.length - 1];
+        if (gradeAverage >= lastPoint.grade5) {
+            return lastPoint.grade9;
+        }
+
+        for (let i = 1; i < table.length; i++) {
+            const prev = table[i - 1];
+            const next = table[i];
+
+            if (gradeAverage === next.grade5) {
+                return next.grade9;
+            }
+
+            if (gradeAverage < next.grade5) {
+                const ratio = (gradeAverage - prev.grade5) / (next.grade5 - prev.grade5);
+                return prev.grade9 + ((next.grade9 - prev.grade9) * ratio);
+            }
+        }
+
+        return lastPoint.grade9;
+    }
+
     // (제거됨) 5등급 기반 9등급 하한 강제 로직은 오류 탐지 가시성을 해치므로 사용하지 않음
 
-    // 9등급 가중평균 계산
-    calculateWeightedAverage9Grade(student, subjects) {
+    calculateExactWeightedAverage9Grade(student, subjects) {
         let totalGradePoints = 0;
         let totalCredits = 0;
         
@@ -847,6 +1324,36 @@ class ScoreAnalyzer {
         });
         
         return totalCredits > 0 ? totalGradePoints / totalCredits : null;
+    }
+
+    // 9등급 가중평균 계산
+    calculateWeightedAverage9Grade(student, subjects) {
+        const exactWeightedAverage9Grade = this.calculateExactWeightedAverage9Grade(student, subjects);
+        if (exactWeightedAverage9Grade !== null) {
+            return exactWeightedAverage9Grade;
+        }
+
+        const isGradeReportSource = student &&
+            (student.hasGradeReportSource || student.sourceFormat === 'grade-report');
+
+        if (!isGradeReportSource) {
+            return null;
+        }
+
+        return this.estimateNineGradeAverageFromFiveGradeAverage(student.weightedAverageGrade);
+    }
+
+    usesBusanNineGradeReference(student, subjects) {
+        if (!student || student.weightedAverage9Grade === null || student.weightedAverage9Grade === undefined) {
+            return false;
+        }
+
+        const isGradeReportSource = student.hasGradeReportSource || student.sourceFormat === 'grade-report';
+        if (!isGradeReportSource) {
+            return false;
+        }
+
+        return this.calculateExactWeightedAverage9Grade(student, subjects) === null;
     }
 
 
@@ -964,7 +1471,7 @@ class ScoreAnalyzer {
         <div id="error" class="error-message" style="display:none;"></div>
         <footer class="app-footer">
             <div class="footer-right">
-                <div class="credits">Made by NAMGUNG YEON (Seolak high school)</div>
+                <div class="credits">2026 강원진학센터 입시분석팀 남궁연(강원 설악고등학교)</div>
                 <a class="help-btn" href="https://namgungyeon.tistory.com/133" target="_blank" rel="noopener" title="도움말 보기">❔ 도움말</a>
             </div>
         </footer>
@@ -996,7 +1503,7 @@ class ScoreAnalyzer {
                 "- index.html: 메인 페이지 (CSS 내장)\\n" +
                 "- style.css: 별도 스타일 파일 (참고용)\\n" +
                 "- script.js: 분석 스크립트\\n\\n" +
-                "Made by NAMGUNG YEON (Seolak high school)\\n" +
+                "2026 강원진학센터 입시분석팀 남궁연(강원 설악고등학교)\\n" +
                 "링크: https://namgungyeon.tistory.com/133"
             );
             
@@ -1017,7 +1524,7 @@ class ScoreAnalyzer {
             setTimeout(() => this.downloadFile(cssContent, "style.css", "text/css"), 500);
             setTimeout(() => this.downloadFile(jsContent, "script.js", "application/javascript"), 1000);
             setTimeout(() => {
-                const readme = "배포용 성적 분석 뷰어\\n========================\\n\\n사용법:\\n1. 모든 파일을 같은 폴더에 저장하세요\\n2. index.html 파일을 웹브라우저에서 열어주세요\\n\\nMade by NAMGUNG YEON (Seolak high school)\\n링크: https://namgungyeon.tistory.com/133";
+                const readme = "배포용 성적 분석 뷰어\\n========================\\n\\n사용법:\\n1. 모든 파일을 같은 폴더에 저장하세요\\n2. index.html 파일을 웹브라우저에서 열어주세요\\n\\n2026 강원진학센터 입시분석팀 남궁연(강원 설악고등학교)\\n링크: https://namgungyeon.tistory.com/133";
                 this.downloadFile(readme, "README.txt", "text/plain");
             }, 1500);
             
@@ -1155,7 +1662,7 @@ class ScoreAnalyzer {
             // 여기서는 모양 보존이 목적이므로 구조만 유지
 
             // 5) 최종 HTML 구성 (외부 스크립트/링크 제거하고 CSS는 인라인)
-            const title = document.title || '(2022개정) 고등학교 1학년 내신 분석 프로그램 Lite';
+            const title = document.title || '(2022개정) 고등학교 내신 분석 프로그램 Lite';
             const html = `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -2263,6 +2770,66 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    getStudentDetailNavigationStudents() {
+        if (!this.combinedData) return [];
+
+        const gradeSelect = document.getElementById('gradeSelect');
+        const classSelect = document.getElementById('classSelect');
+        const studentNameSearch = document.getElementById('studentNameSearch');
+        const studentSearch = document.getElementById('studentSearch');
+
+        const selectedGrade = gradeSelect ? gradeSelect.value : '';
+        const selectedClass = classSelect ? classSelect.value : '';
+        const detailQuery = studentNameSearch && studentNameSearch.value
+            ? studentNameSearch.value.trim().toLowerCase()
+            : '';
+        const tableQuery = studentSearch && studentSearch.value
+            ? studentSearch.value.trim().toLowerCase()
+            : '';
+
+        let students = this.combinedData.students;
+        if (selectedGrade) {
+            students = students.filter(s => String(s.grade) === String(selectedGrade));
+        }
+        if (selectedClass) {
+            students = students.filter(s => String(s.class) === String(selectedClass));
+        }
+        if (detailQuery) {
+            students = students.filter(s =>
+                (s.name && s.name.toLowerCase().includes(detailQuery)) ||
+                (s.originalNumber && String(s.originalNumber).includes(detailQuery))
+            );
+        }
+        if (tableQuery) {
+            students = students.filter(s =>
+                (s.name && s.name.toLowerCase().includes(tableQuery)) ||
+                String(s.number).includes(tableQuery) ||
+                (s.originalNumber && String(s.originalNumber).includes(tableQuery))
+            );
+        }
+
+        return students;
+    }
+
+    navigateStudentDetail(offset) {
+        const studentSelect = document.getElementById('studentSelect');
+        const currentStudentId = studentSelect ? studentSelect.value : '';
+        const navigationStudents = this.getStudentDetailNavigationStudents();
+        if (!currentStudentId || navigationStudents.length === 0) return;
+
+        const currentIndex = navigationStudents.findIndex(student => String(student.number) === String(currentStudentId));
+        if (currentIndex === -1) return;
+
+        const nextIndex = currentIndex + offset;
+        if (nextIndex < 0 || nextIndex >= navigationStudents.length) return;
+
+        const targetStudent = navigationStudents[nextIndex];
+        if (studentSelect) {
+            studentSelect.value = targetStudent.number;
+        }
+        this.renderStudentDetail(targetStudent);
+    }
+
     renderStudentTable(students, subjects, container) {
         container.innerHTML = '';
 
@@ -2483,9 +3050,33 @@ document.addEventListener('DOMContentLoaded', () => {
         const averageGradeRank = student.averageGradeRank;
         const sameGradeCount = student.sameGradeCount;
         const totalGradedStudents = student.totalGradedStudents;
+        const studentSelect = document.getElementById('studentSelect');
+        if (studentSelect) {
+            studentSelect.value = student.number;
+        }
+
+        const filteredStudents = this.getStudentDetailNavigationStudents();
+        const navigationStudents = filteredStudents.some(s => String(s.number) === String(student.number))
+            ? filteredStudents
+            : [student];
+        const navigationIndex = navigationStudents.findIndex(s => String(s.number) === String(student.number));
+        const hasPrevStudent = navigationIndex > 0;
+        const hasNextStudent = navigationIndex >= 0 && navigationIndex < navigationStudents.length - 1;
+        const navigationLabel = navigationStudents.length > 0 && navigationIndex >= 0
+            ? `${navigationIndex + 1} / ${navigationStudents.length}`
+            : '';
+        const usesBusanReference = this.usesBusanNineGradeReference(student, this.combinedData.subjects);
+        const nineGradeReferenceNote = usesBusanReference
+            ? '<span class="summary-note">부산교육청 발표자료를 환산 기준으로 사용했습니다.</span>'
+            : '';
         
         const html = `
             <div class="print-controls">
+                <div class="student-nav-controls">
+                    <button class="detail-btn student-nav-btn" data-nav-offset="-1" ${hasPrevStudent ? '' : 'disabled'}>이전 학생</button>
+                    <span class="student-nav-status">${navigationLabel}</span>
+                    <button class="detail-btn student-nav-btn" data-nav-offset="1" ${hasNextStudent ? '' : 'disabled'}>다음 학생</button>
+                </div>
                 <button class="pdf-btn" onclick="scoreAnalyzer.generatePDF('${student.name}')">PDF 저장</button>
             </div>
             
@@ -2533,7 +3124,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                     </div>
                                     <div class="summary-item">
                                         <span class="summary-label">평균등급(9등급환산)</span>
-                                        <span class="summary-value orange">${student.weightedAverage9Grade ? student.weightedAverage9Grade.toFixed(2) : 'N/A'}</span>
+                                        <span class="summary-value-group">
+                                            <span class="summary-value orange">${student.weightedAverage9Grade ? student.weightedAverage9Grade.toFixed(2) : 'N/A'}</span>
+                                            ${nineGradeReferenceNote}
+                                        </span>
                                     </div>
                                     <div class="summary-item">
                                         <span class="summary-label">등급 순위</span>
@@ -2568,6 +3162,15 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         
         container.innerHTML = html;
+
+        container.querySelectorAll('.student-nav-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                const offset = parseInt(button.getAttribute('data-nav-offset'), 10);
+                if (!isNaN(offset)) {
+                    this.navigateStudentDetail(offset);
+                }
+            });
+        });
         
         // 레이더 차트 생성
         setTimeout(() => {
@@ -2581,6 +3184,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const averageGradeRank = student.averageGradeRank;
         const sameGradeCount = student.sameGradeCount;
         const totalGradedStudents = student.totalGradedStudents;
+        const usesBusanReference = this.usesBusanNineGradeReference(student, this.combinedData.subjects);
+        const nineGradeReferenceNote = usesBusanReference
+            ? '<span class="summary-note">부산교육청 발표자료를 환산 기준으로 사용했습니다.</span>'
+            : '';
         return `
             <div class="student-print-page">
                 <div id="printArea-${canvasId}" class="print-area">
@@ -2627,7 +3234,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                         </div>
                                         <div class="summary-item">
                                             <span class="summary-label">평균등급(9등급환산)</span>
-                                            <span class="summary-value orange">${student.weightedAverage9Grade ? student.weightedAverage9Grade.toFixed(2) : 'N/A'}</span>
+                                            <span class="summary-value-group">
+                                                <span class="summary-value orange">${student.weightedAverage9Grade ? student.weightedAverage9Grade.toFixed(2) : 'N/A'}</span>
+                                                ${nineGradeReferenceNote}
+                                            </span>
                                         </div>
                                         <div class="summary-item">
                                             <span class="summary-label">등급 순위</span>
@@ -2985,6 +3595,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const groupOrder = this.subjectGroups?.groups || {};
 
         this.combinedData.subjects.forEach(subject => {
+            if (!this.hasStudentSubjectData(student, subject.name)) {
+                return;
+            }
+
             const groupName = this.getSubjectGroup(subject.name);
             if (!groupedSubjects[groupName]) {
                 groupedSubjects[groupName] = {
@@ -2999,6 +3613,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // 교과군 순서대로 정렬
         const sortedGroups = Object.entries(groupedSubjects)
             .sort((a, b) => a[1].order - b[1].order);
+
+        if (sortedGroups.length === 0) {
+            return '<p>표시할 과목 데이터가 없습니다.</p>';
+        }
 
         // 교과군별로 테이블 생성
         return sortedGroups.map(([groupName, groupData]) => {
@@ -3034,12 +3652,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
     }
 
+    hasStudentSubjectData(student, subjectName) {
+        const hasOwn = (obj) => obj && Object.prototype.hasOwnProperty.call(obj, subjectName);
+        return hasOwn(student.scores) ||
+            hasOwn(student.achievements) ||
+            hasOwn(student.grades) ||
+            hasOwn(student.ranks) ||
+            hasOwn(student.subjectTotals) ||
+            hasOwn(student.percentiles);
+    }
+
     // 개별 과목 테이블 행 렌더링
     renderSubjectTableRow(student, subject) {
-        const score = student.scores[subject.name] || 0;
-        const achievement = student.achievements[subject.name] || '-';
-        const grade = student.grades ? student.grades[subject.name] : undefined;
-        const rank = student.ranks ? student.ranks[subject.name] || '-' : '-';
+        const hasScore = student.scores && Object.prototype.hasOwnProperty.call(student.scores, subject.name);
+        const score = hasScore ? student.scores[subject.name] : null;
+        const achievement = student.achievements && Object.prototype.hasOwnProperty.call(student.achievements, subject.name)
+            ? student.achievements[subject.name]
+            : '-';
+        const grade = student.grades && Object.prototype.hasOwnProperty.call(student.grades, subject.name)
+            ? student.grades[subject.name]
+            : undefined;
+        const rank = student.ranks && Object.prototype.hasOwnProperty.call(student.ranks, subject.name)
+            ? student.ranks[subject.name]
+            : '-';
         const percentile = student.percentiles && Object.prototype.hasOwnProperty.call(student.percentiles, subject.name)
             ? student.percentiles[subject.name]
             : null;
@@ -3058,7 +3693,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="subject-name-cell">${subject.name}</td>
                 <td class="center">${subject.credits}</td>
                 <td class="center">
-                    <span class="score-value">${score}</span>
+                    <span class="score-value">${score !== null && score !== undefined ? score : '-'}</span>
                     <span class="avg-value">(${subject.average ? subject.average.toFixed(1) : '-'})</span>
                 </td>
                 <td class="center"><span class="achievement-badge ${achievement}">${achievement}</span></td>

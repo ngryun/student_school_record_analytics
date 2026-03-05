@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>(2022개정) 고등학교 1학년 내신 분석 프로그램 Lite</title>
+    <title>(2022개정) 고등학교 내신 분석 프로그램 Lite</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
@@ -13,39 +13,26 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
-    <!-- 눈 내리는 효과 -->
-    <div class="snowflakes" aria-hidden="true">
-        <div class="snowflake">❄</div>
-        <div class="snowflake">❅</div>
-        <div class="snowflake">❆</div>
-        <div class="snowflake">❄</div>
-        <div class="snowflake">❅</div>
-        <div class="snowflake">❆</div>
-        <div class="snowflake">❄</div>
-        <div class="snowflake">❅</div>
-        <div class="snowflake">❆</div>
-        <div class="snowflake">❄</div>
-    </div>
-
     <div class="container">
         <header>
-            <h1>(2022개정) 고등학교 1학년 내신 분석 프로그램 <span class="badge-lite">Lite</span></h1>
-            
+            <h1>(2022개정) 고등학교 내신 분석 프로그램 <span class="badge-lite">Lite</span></h1>
+            <p class="header-subtitle">2026 강원진학센터 입시분석팀</p>
         </header>
 
             <div class="upload-section">
                 <div class="upload-guide">
-                    <p><strong>📋 NEIS 자료 업로드 방법:</strong></p>
-                    <p>성적조회/통계 → 학기말성적조회 → 학기말성적종합일람표 → <strong>XLS data</strong> 파일을 다운로드하세요</p>
-                    <p class="warning-text"><strong>⚠️ 주의: <span class="xls">XLS</span> 아닙니다. <span class="xlsdata">XLS data</span> 양식을 업로드 해야합니다.</strong></p>
+                    <p class="guide-title">NEIS 자료 업로드 방법</p>
+                    <p><strong>(학기초)</strong> 학교생활기록부 → 학생부 항목별 조회 → 교과학습발달상황 → 교과학습발달상황 → 디스켓 버튼 → <strong>XLS data</strong> <span class="guide-inline-note">(*XLS 아님)</span></p>
+                    <p><strong>(학기종료 후)</strong> 성적조회/통계 → 학기말성적조회 → 학기말성적종합일람표 → <strong>XLS data</strong> 파일</p>
+                    <p class="warning-text"><strong><span class="xls">XLS</span>가 아니라 <span class="xlsdata">XLS data</span> 양식을 업로드해야 합니다.</strong></p>
                     <div class="privacy-notice">
-                        <p>🔒 보안 안내</p>
+                        <p>보안 안내</p>
                         <ul>
                             <li>업로드한 성적 파일은 <strong>서버에 전송/저장되지 않습니다</strong>.</li>
                             <li>모든 분석은 <strong>사용자의 브라우저(로컬)</strong>에서만 수행됩니다.</li>
                             <li>페이지를 닫거나 새로고침하면 메모리에 남은 데이터는 사라집니다.</li>
                         </ul>
-                        <p class="privacy-footnote">즉, 업로드한 양식은 외부로 유출되지 않습니다 🙂</p>
+                        <p class="privacy-footnote">즉, 업로드한 데이터는 외부로 전송되지 않습니다.</p>
                     </div>
                 </div>
                 <div class="section-divider"></div>
@@ -59,8 +46,8 @@
                 <div id="fileList" class="file-list" style="display: none;"></div>
                 <div class="action-buttons">
                     <button id="analyzeBtn" class="analyze-btn" disabled>분석 시작</button>
-                    <button id="exportCsvBtn" class="analyze-btn" disabled style="margin-left: 10px;">취합용 DB 파일 생성</button>
-                    <button id="exportHtmlBtn" class="analyze-btn" disabled style="margin-left: 10px;">분석결과 HTML 저장</button>
+                    <button id="exportCsvBtn" class="analyze-btn secondary-btn" disabled>취합용 DB 파일 생성</button>
+                    <button id="exportHtmlBtn" class="analyze-btn secondary-btn" disabled>분석결과 HTML 저장</button>
                 </div>
             </div>
 
@@ -166,9 +153,9 @@
 
         <footer class="app-footer">
             <div class="footer-right">
-                <div class="credits">Made by NAMGUNG YEON (Seolak high school)</div>
+                <div class="credits">2026 강원진학센터 입시분석팀 남궁연(강원 설악고등학교)</div>
                 <span class="updated" id="lastUpdated"></span>
-                <a class="help-btn" href="https://namgungyeon.tistory.com/133" target="_blank" rel="noopener" title="도움말 보기">❔ 도움말</a>
+                <a class="help-btn" href="https://namgungyeon.tistory.com/133" target="_blank" rel="noopener" title="도움말 보기">도움말</a>
             </div>
         </footer>
     </div>
