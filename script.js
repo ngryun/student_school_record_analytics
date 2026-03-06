@@ -1394,16 +1394,44 @@ class ScoreAnalyzer {
         ];
     }
 
+    getBusanTopNineGradeRange() {
+        return {
+            grade5: 1.00,
+            minGrade9: 1.15,
+            maxGrade9: 1.45,
+            display: '1.15~1.45'
+        };
+    }
+
+    shouldDisplayBusanTopNineGradeRange(student, subjects) {
+        if (!this.usesBusanNineGradeReference(student, subjects)) {
+            return false;
+        }
+
+        const gradeAverage = student?.weightedAverageGrade;
+        if (gradeAverage === null || gradeAverage === undefined || isNaN(gradeAverage)) {
+            return false;
+        }
+
+        return Number(gradeAverage.toFixed(2)) <= this.getBusanTopNineGradeRange().grade5;
+    }
+
     estimateNineGradeAverageFromFiveGradeAverage(gradeAverage) {
         if (gradeAverage === null || gradeAverage === undefined || isNaN(gradeAverage)) {
             return null;
         }
 
+        const topRange = this.getBusanTopNineGradeRange();
         const table = this.getBusanGradeAverageToNineGradeTable();
         if (table.length === 0) return null;
 
-        if (gradeAverage <= table[0].grade5) {
-            return table[0].grade9;
+        if (gradeAverage <= topRange.grade5) {
+            return topRange.maxGrade9;
+        }
+
+        if (gradeAverage < table[0].grade5) {
+            const ratio = (gradeAverage - topRange.grade5) / (table[0].grade5 - topRange.grade5);
+            return topRange.maxGrade9 + ((table[0].grade9 - topRange.maxGrade9) * ratio);
         }
 
         const lastPoint = table[table.length - 1];
@@ -1426,6 +1454,18 @@ class ScoreAnalyzer {
         }
 
         return lastPoint.grade9;
+    }
+
+    formatWeightedAverage9GradeDisplay(student, subjects) {
+        if (!student || student.weightedAverage9Grade === null || student.weightedAverage9Grade === undefined) {
+            return 'N/A';
+        }
+
+        if (this.shouldDisplayBusanTopNineGradeRange(student, subjects)) {
+            return this.getBusanTopNineGradeRange().display;
+        }
+
+        return student.weightedAverage9Grade.toFixed(2);
     }
 
     // (제거됨) 5등급 기반 9등급 하한 강제 로직은 오류 탐지 가시성을 해치므로 사용하지 않음
@@ -3257,7 +3297,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     <div class="summary-item">
                                         <span class="summary-label">평균등급(9등급환산)</span>
                                         <span class="summary-value-group">
-                                            <span class="summary-value orange">${student.weightedAverage9Grade ? student.weightedAverage9Grade.toFixed(2) : 'N/A'}</span>
+                                            <span class="summary-value orange">${this.formatWeightedAverage9GradeDisplay(student, this.combinedData.subjects)}</span>
                                             ${nineGradeReferenceNote}
                                         </span>
                                     </div>
@@ -3367,7 +3407,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                         <div class="summary-item">
                                             <span class="summary-label">평균등급(9등급환산)</span>
                                             <span class="summary-value-group">
-                                                <span class="summary-value orange">${student.weightedAverage9Grade ? student.weightedAverage9Grade.toFixed(2) : 'N/A'}</span>
+                                                <span class="summary-value orange">${this.formatWeightedAverage9GradeDisplay(student, this.combinedData.subjects)}</span>
                                                 ${nineGradeReferenceNote}
                                             </span>
                                         </div>
@@ -4212,9 +4252,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // 평균등급 (5등급, 9등급)
+                const weightedAverage9GradeDisplay = this.formatWeightedAverage9GradeDisplay(student, subjects);
                 row.push(
                     student.weightedAverageGrade ? student.weightedAverageGrade.toFixed(2) : '',
-                    student.weightedAverage9Grade ? student.weightedAverage9Grade.toFixed(2) : ''
+                    weightedAverage9GradeDisplay === 'N/A' ? '' : weightedAverage9GradeDisplay
                 );
 
                 // 과목별 등급 (5등급)
@@ -5320,7 +5361,7 @@ class StandaloneScoreAnalyzer {
                                 </div>
                                 <div class="summary-item">
                                     <span class="summary-label">평균등급(9등급환산)</span>
-                                    <span class="summary-value orange">\${student.weightedAverage9Grade ? student.weightedAverage9Grade.toFixed(2) : 'N/A'}</span>
+                                    <span class="summary-value orange">\${this.formatWeightedAverage9GradeDisplay(student, this.combinedData.subjects)}</span>
                                 </div>
                                 <div class="summary-item">
                                     <span class="summary-label">등급 순위</span>
