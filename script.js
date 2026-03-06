@@ -169,6 +169,11 @@ class ScoreAnalyzer {
         return "기타";
     }
 
+    getSubjectColumnLabel(subject) {
+        if (!subject || !subject.name) return '';
+        return `${this.getSubjectGroup(subject.name)}_${subject.name}`;
+    }
+
     // 학생의 교과(군)별 평균 등급 계산
     calculateGroupGrades(student) {
         const groupData = {};
@@ -300,7 +305,7 @@ class ScoreAnalyzer {
 
         if (exportCsvBtn) exportCsvBtn.addEventListener('click', () => { this.exportToCSV(); });
 
-        if (exportHtmlBtn) exportHtmlBtn.addEventListener('click', () => { this.exportAsStandaloneHtml(); });
+        if (exportHtmlBtn) exportHtmlBtn.addEventListener('click', () => { this.showHtmlExportOptionsModal(); });
 
         
 
@@ -4179,7 +4184,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // 과목별 등급 (5등급)
             subjects.forEach(subject => {
-                headers.push(subject.name);
+                headers.push(this.getSubjectColumnLabel(subject));
             });
 
             // 교과군별 평균등급
@@ -4305,7 +4310,90 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 독립형 HTML 파일로 내보내기
-    async exportAsStandaloneHtml() {
+    showHtmlExportOptionsModal() {
+        const existingModal = document.getElementById('htmlExportOptionsModal');
+        if (existingModal) existingModal.remove();
+
+        const modal = document.createElement('div');
+        modal.id = 'htmlExportOptionsModal';
+        modal.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); display: flex; align-items: center;
+            justify-content: center; z-index: 10000;
+        `;
+        modal.innerHTML = `
+            <div style="background: var(--bg-card, #fff); padding: 30px; border-radius: 16px;
+                        max-width: 440px; width: 92%; box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
+                <h3 style="margin: 0 0 18px 0; color: var(--text-primary, #333); font-size: 1.2rem;">
+                    분석결과 HTML 저장
+                </h3>
+                <p style="margin: 0 0 14px 0; color: var(--text-secondary, #666); line-height: 1.5; font-size: 0.92rem;">
+                    열기 암호를 설정하면 저장 파일을 열 때 먼저 암호를 입력해야 합니다.
+                    비워두면 기존처럼 암호 없이 저장됩니다.
+                </p>
+                <div style="display: grid; gap: 12px; margin-bottom: 10px;">
+                    <label style="display: grid; gap: 6px;">
+                        <span style="font-size: 0.9rem; color: var(--text-primary, #333); font-weight: 600;">열기 암호</span>
+                        <input type="password" id="htmlExportPassword" placeholder="선택 입력"
+                               style="padding: 12px; border: 1px solid var(--neutral-300, #ddd); border-radius: 8px; font-size: 0.95rem;">
+                    </label>
+                    <label style="display: grid; gap: 6px;">
+                        <span style="font-size: 0.9rem; color: var(--text-primary, #333); font-weight: 600;">암호 확인</span>
+                        <input type="password" id="htmlExportPasswordConfirm" placeholder="암호를 다시 입력"
+                               style="padding: 12px; border: 1px solid var(--neutral-300, #ddd); border-radius: 8px; font-size: 0.95rem;">
+                    </label>
+                </div>
+                <p style="margin: 0 0 18px 0; font-size: 0.82rem; color: var(--text-muted, #888); line-height: 1.5;">
+                    이 기능은 최소한의 보호 장치입니다. 암호를 잊으면 저장 파일에서 데이터를 복구할 수 없습니다.
+                </p>
+                <div id="htmlExportOptionsError" style="min-height: 1.2em; margin-bottom: 12px; color: #c0392b; font-size: 0.85rem;"></div>
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button id="cancelHtmlExport" style="padding: 10px 20px; border: 1px solid var(--neutral-300, #ddd);
+                            background: var(--bg-card, #fff); border-radius: 8px; cursor: pointer;
+                            color: var(--text-secondary, #666);">
+                        취소
+                    </button>
+                    <button id="confirmHtmlExport" style="padding: 10px 20px; border: none;
+                            background: linear-gradient(135deg, var(--primary, #8B2942), var(--primary-dark, #6B1D32));
+                            color: white; border-radius: 8px; cursor: pointer; font-weight: 500;">
+                        HTML 다운로드
+                    </button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        const passwordInput = document.getElementById('htmlExportPassword');
+        const confirmInput = document.getElementById('htmlExportPasswordConfirm');
+        const errorDiv = document.getElementById('htmlExportOptionsError');
+        const closeModal = () => modal.remove();
+
+        document.getElementById('cancelHtmlExport').addEventListener('click', closeModal);
+        document.getElementById('confirmHtmlExport').addEventListener('click', async () => {
+            const password = passwordInput ? passwordInput.value : '';
+            const passwordConfirm = confirmInput ? confirmInput.value : '';
+
+            if ((password || passwordConfirm) && password !== passwordConfirm) {
+                if (errorDiv) errorDiv.textContent = '암호와 확인 입력이 일치하지 않습니다.';
+                if (confirmInput) confirmInput.focus();
+                return;
+            }
+
+            closeModal();
+            await this.exportAsStandaloneHtml({ password });
+        });
+
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal();
+        });
+
+        if (passwordInput) {
+            setTimeout(() => passwordInput.focus(), 0);
+        }
+    }
+
+    async exportAsStandaloneHtml(options = {}) {
         if (!this.combinedData) {
             this.showError('분석 데이터가 없습니다.');
             return;
@@ -4313,7 +4401,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             // 현재 페이지의 HTML을 읽어서 독립형 버전 생성
-            const htmlTemplate = await this.generateStandaloneHtmlTemplate();
+            const htmlTemplate = await this.generateStandaloneHtmlTemplate(options);
             
             // BOM을 추가하여 한글이 제대로 표시되도록 함
             const BOM = '\uFEFF';
@@ -4371,11 +4459,268 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(text).replace(/<\/script/gi, '<\\/script');
     }
 
+    arrayBufferToBase64(buffer) {
+        const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+        }
+        return btoa(binary);
+    }
+
+    async derivePasswordKey(password, salt, keyUsages) {
+        if (!window.crypto || !window.crypto.subtle) {
+            throw new Error('현재 브라우저는 암호 보호 HTML 저장을 지원하지 않습니다.');
+        }
+
+        const encoder = new TextEncoder();
+        const baseKey = await crypto.subtle.importKey(
+            'raw',
+            encoder.encode(password),
+            'PBKDF2',
+            false,
+            ['deriveKey']
+        );
+
+        return crypto.subtle.deriveKey(
+            {
+                name: 'PBKDF2',
+                salt,
+                iterations: 250000,
+                hash: 'SHA-256'
+            },
+            baseKey,
+            {
+                name: 'AES-GCM',
+                length: 256
+            },
+            false,
+            keyUsages
+        );
+    }
+
+    async encryptExportPayload(password, payload) {
+        const encoder = new TextEncoder();
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const key = await this.derivePasswordKey(password, salt, ['encrypt']);
+        const ciphertext = await crypto.subtle.encrypt(
+            {
+                name: 'AES-GCM',
+                iv
+            },
+            key,
+            encoder.encode(JSON.stringify(payload))
+        );
+
+        return {
+            salt: this.arrayBufferToBase64(salt),
+            iv: this.arrayBufferToBase64(iv),
+            ciphertext: this.arrayBufferToBase64(ciphertext),
+            iterations: 250000
+        };
+    }
+
+    buildProtectedHtmlBootstrap(encryptedPayload) {
+        return `
+(() => {
+    const encryptedPayload = ${JSON.stringify(encryptedPayload)};
+    const LOCK_CLASS = 'protected-export-locked';
+    window.APP_BUILD_UTC = new Date().toISOString();
+
+    const style = document.createElement('style');
+    style.textContent = \`
+body.\${LOCK_CLASS} .container { visibility: hidden !important; }
+#protectedExportOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(8px);
+}
+#protectedExportOverlay .overlay-card {
+    width: min(100%, 420px);
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 28px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+    border: 1px solid rgba(15, 23, 42, 0.08);
+}
+#protectedExportOverlay h2 {
+    margin: 0 0 10px 0;
+    font-size: 1.25rem;
+    color: #0f172a;
+}
+#protectedExportOverlay p {
+    margin: 0 0 16px 0;
+    color: #475569;
+    line-height: 1.55;
+    font-size: 0.93rem;
+}
+#protectedExportOverlay input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid #cbd5e1;
+    font-size: 1rem;
+    margin-bottom: 12px;
+    box-sizing: border-box;
+}
+#protectedExportOverlay button {
+    width: 100%;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 14px;
+    background: #10A37F;
+    color: #ffffff;
+    font-size: 0.98rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+#protectedExportOverlay button:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+#protectedExportStatus {
+    min-height: 1.2em;
+    margin-top: 12px;
+    color: #b91c1c;
+    font-size: 0.88rem;
+}
+\`;
+    document.head.appendChild(style);
+    document.body.classList.add(LOCK_CLASS);
+
+    const overlay = document.createElement('div');
+    overlay.id = 'protectedExportOverlay';
+    overlay.innerHTML = \`
+        <div class="overlay-card">
+            <h2>암호 보호된 분석 결과</h2>
+            <p>이 파일은 암호가 맞아야 분석 결과를 복호화해서 보여줍니다.</p>
+            <input id="protectedExportPassword" type="password" placeholder="열기 암호 입력" autocomplete="current-password">
+            <button id="protectedExportUnlock">열기</button>
+            <div id="protectedExportStatus"></div>
+        </div>
+    \`;
+    document.body.appendChild(overlay);
+
+    const passwordInput = document.getElementById('protectedExportPassword');
+    const unlockButton = document.getElementById('protectedExportUnlock');
+    const statusEl = document.getElementById('protectedExportStatus');
+
+    const base64ToBytes = (base64) => {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+    };
+
+    const unlock = async () => {
+        const password = passwordInput ? passwordInput.value : '';
+        if (!password) {
+            if (statusEl) statusEl.textContent = '암호를 입력하세요.';
+            if (passwordInput) passwordInput.focus();
+            return;
+        }
+
+        unlockButton.disabled = true;
+        if (statusEl) statusEl.textContent = '암호 확인 중...';
+
+        try {
+            const salt = base64ToBytes(encryptedPayload.salt);
+            const iv = base64ToBytes(encryptedPayload.iv);
+            const ciphertext = base64ToBytes(encryptedPayload.ciphertext);
+            const encoder = new TextEncoder();
+            const baseKey = await crypto.subtle.importKey(
+                'raw',
+                encoder.encode(password),
+                'PBKDF2',
+                false,
+                ['deriveKey']
+            );
+            const key = await crypto.subtle.deriveKey(
+                {
+                    name: 'PBKDF2',
+                    salt,
+                    iterations: encryptedPayload.iterations,
+                    hash: 'SHA-256'
+                },
+                baseKey,
+                {
+                    name: 'AES-GCM',
+                    length: 256
+                },
+                false,
+                ['decrypt']
+            );
+            const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+            const payload = JSON.parse(new TextDecoder().decode(decrypted));
+
+            window.PRELOADED_DATA = payload.analysisData;
+            window.PRELOADED_SUBJECT_GROUPS = payload.subjectGroups;
+            window.PRELOADED_UI_STATE = payload.uiState;
+
+            document.body.classList.remove(LOCK_CLASS);
+            overlay.remove();
+
+            const initializeDecryptedView = async () => {
+                if (typeof scoreAnalyzer !== 'undefined' && scoreAnalyzer && typeof scoreAnalyzer.initializePreloadedView === 'function') {
+                    scoreAnalyzer.subjectGroups = payload.subjectGroups || scoreAnalyzer.subjectGroups;
+                    scoreAnalyzer.subjectGroupsReady = Promise.resolve(scoreAnalyzer.subjectGroups);
+                    await scoreAnalyzer.initializePreloadedView();
+                } else if (typeof ScoreAnalyzer === 'function') {
+                    scoreAnalyzer = new ScoreAnalyzer();
+                }
+            };
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => {
+                    initializeDecryptedView();
+                }, { once: true });
+            } else {
+                await initializeDecryptedView();
+            }
+        } catch (error) {
+            if (statusEl) statusEl.textContent = '암호가 올바르지 않거나 파일이 손상되었습니다.';
+            if (passwordInput) {
+                passwordInput.focus();
+                passwordInput.select();
+            }
+        } finally {
+            unlockButton.disabled = false;
+        }
+    };
+
+    unlockButton.addEventListener('click', () => {
+        unlock();
+    });
+
+    if (passwordInput) {
+        passwordInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                unlock();
+            }
+        });
+        setTimeout(() => passwordInput.focus(), 0);
+    }
+})();
+`;
+    }
+
     // 독립형 HTML 템플릿 생성
-    async generateStandaloneHtmlTemplate() {
+    async generateStandaloneHtmlTemplate(options = {}) {
         const analysisData = JSON.stringify(this.combinedData);
         const subjectGroupsData = JSON.stringify(this.subjectGroups || null);
         const uiState = JSON.stringify(this.getCurrentUiState());
+        const password = typeof options.password === 'string' ? options.password : '';
 
         // 원본 index.html, style.css, script.js를 그대로 사용하여 완전 동일한 구조로 생성
         const fetchText = async (url) => {
@@ -4440,7 +4785,16 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const appScript = doc.querySelector('script[src="script.js"]');
             const preload = doc.createElement('script');
-            preload.textContent = this.escapeInlineScriptContent(`window.APP_BUILD_UTC = new Date().toISOString();\nwindow.PRELOADED_DATA = ${analysisData};\nwindow.PRELOADED_SUBJECT_GROUPS = ${subjectGroupsData};\nwindow.PRELOADED_UI_STATE = ${uiState};`);
+            let preloadScript = `window.APP_BUILD_UTC = new Date().toISOString();\nwindow.PRELOADED_DATA = ${analysisData};\nwindow.PRELOADED_SUBJECT_GROUPS = ${subjectGroupsData};\nwindow.PRELOADED_UI_STATE = ${uiState};`;
+            if (password) {
+                const encryptedPayload = await this.encryptExportPayload(password, {
+                    analysisData: this.combinedData,
+                    subjectGroups: this.subjectGroups || null,
+                    uiState: this.getCurrentUiState()
+                });
+                preloadScript = this.buildProtectedHtmlBootstrap(encryptedPayload);
+            }
+            preload.textContent = this.escapeInlineScriptContent(preloadScript);
             const inline = doc.createElement('script');
             if (!runtimeJsText || !runtimeJsText.trim()) {
                 console.warn('동작 스크립트를 확보하지 못해 현재 화면 스냅샷으로 저장합니다.');
