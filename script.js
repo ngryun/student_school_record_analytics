@@ -4,28 +4,109 @@ class ScoreAnalyzer {
         this.combinedData = null; // 통합된 분석 데이터
         this.selectedFiles = null; // 사용자가 선택/드롭한 파일 목록
         this.subjectGroups = null; // 교과(군) 매핑 데이터
-        this.loadSubjectGroups(); // 교과(군) 데이터 로드
+        this.subjectGroupsReady = this.loadSubjectGroups(); // 교과(군) 데이터 로드
+        this.handleStudentDetailKeydown = this.handleStudentDetailKeydown.bind(this);
         this.initializeEventListeners();
 
         // If the page provides preloaded analysis data, render directly
         if (window.PRELOADED_DATA) {
-            try {
-                this.combinedData = window.PRELOADED_DATA;
-                const upload = document.querySelector('.upload-section');
-                if (upload) upload.style.display = 'none';
-                const results = document.getElementById('results');
-                if (results) results.style.display = 'block';
-                this.displayResults();
-                const exportBtn = document.getElementById('exportBtn');
-                if (exportBtn) exportBtn.disabled = false;
-            } catch (e) {
-                console.error('PRELOADED_DATA 처리 중 오류:', e);
+            this.initializePreloadedView();
+        }
+    }
+
+    async initializePreloadedView() {
+        try {
+            await this.subjectGroupsReady;
+            this.combinedData = window.PRELOADED_DATA;
+            this.setIntroSectionVisible(false);
+            const results = document.getElementById('results');
+            if (results) results.style.display = 'block';
+            this.displayResults();
+            this.applyPreloadedUiState();
+            const exportCsvBtn = document.getElementById('exportCsvBtn');
+            const exportHtmlBtn = document.getElementById('exportHtmlBtn');
+            if (exportCsvBtn) exportCsvBtn.disabled = false;
+            if (exportHtmlBtn) exportHtmlBtn.disabled = false;
+        } catch (e) {
+            console.error('PRELOADED_DATA 처리 중 오류:', e);
+        }
+    }
+
+    setIntroSectionVisible(visible) {
+        const container = document.querySelector('.container');
+        if (!container) return;
+        container.classList.toggle('post-analysis', !visible);
+    }
+
+    getCurrentUiState() {
+        const activeTabBtn = document.querySelector('.tab-btn.active');
+        const detailViewBtn = document.getElementById('detailViewBtn');
+
+        return {
+            activeTab: activeTabBtn ? activeTabBtn.dataset.tab : 'grade-analysis',
+            activeView: detailViewBtn && detailViewBtn.classList.contains('active') ? 'detail' : 'table',
+            selectedGrade: document.getElementById('gradeSelect')?.value || '',
+            selectedClass: document.getElementById('classSelect')?.value || '',
+            selectedStudent: document.getElementById('studentSelect')?.value || '',
+            studentNameSearch: document.getElementById('studentNameSearch')?.value || '',
+            studentSearch: document.getElementById('studentSearch')?.value || ''
+        };
+    }
+
+    applyPreloadedUiState() {
+        const state = window.PRELOADED_UI_STATE;
+        if (!state || !this.combinedData) return;
+
+        const gradeSelect = document.getElementById('gradeSelect');
+        const classSelect = document.getElementById('classSelect');
+        const studentSelect = document.getElementById('studentSelect');
+        const studentNameSearch = document.getElementById('studentNameSearch');
+        const studentSearch = document.getElementById('studentSearch');
+        const showStudentDetail = document.getElementById('showStudentDetail');
+
+        if (gradeSelect) gradeSelect.value = state.selectedGrade || '';
+        this.updateClassOptions();
+
+        if (classSelect) classSelect.value = state.selectedClass || '';
+        if (studentNameSearch) studentNameSearch.value = state.studentNameSearch || '';
+        this.updateStudentOptions();
+
+        if (studentSelect && state.selectedStudent) {
+            studentSelect.value = String(state.selectedStudent);
+        }
+        if (studentSearch) {
+            studentSearch.value = state.studentSearch || '';
+        }
+        if (showStudentDetail && studentSelect) {
+            showStudentDetail.disabled = !studentSelect.value;
+        }
+
+        this.filterStudentTable();
+
+        if (state.activeTab && document.querySelector(`[data-tab="${state.activeTab}"]`)) {
+            this.switchTab(state.activeTab);
+        }
+
+        if (state.activeView === 'detail' && studentSelect && studentSelect.value) {
+            const targetStudent = this.combinedData.students.find(
+                student => String(student.number) === String(studentSelect.value)
+            );
+            if (targetStudent) {
+                this.renderStudentDetail(targetStudent);
+                this.switchView('detail');
             }
+        } else if (state.activeView === 'table') {
+            this.switchView('table');
         }
     }
 
     // 교과(군) 매핑 데이터 로드
     async loadSubjectGroups() {
+        if (window.PRELOADED_SUBJECT_GROUPS) {
+            this.subjectGroups = window.PRELOADED_SUBJECT_GROUPS;
+            return this.subjectGroups;
+        }
+
         try {
             const response = await fetch('subjectGroups.json');
             if (response.ok) {
@@ -39,6 +120,8 @@ class ScoreAnalyzer {
             console.warn('교과(군) 매핑 데이터 로드 실패:', error);
             this.setDefaultSubjectGroups();
         }
+
+        return this.subjectGroups;
     }
 
     // 기본 교과(군) 매핑 설정 (JSON 로드 실패 시)
@@ -154,6 +237,8 @@ class ScoreAnalyzer {
         const uploadSection = document.querySelector('.upload-section');
         const fileLabel = document.querySelector('.file-input-label');
 
+        document.addEventListener('keydown', this.handleStudentDetailKeydown);
+
         fileInput.addEventListener('change', (e) => {
             const files = Array.from(e.target.files);
             if (files.length > 0) {
@@ -215,7 +300,7 @@ class ScoreAnalyzer {
 
         if (exportCsvBtn) exportCsvBtn.addEventListener('click', () => { this.exportToCSV(); });
 
-        if (exportHtmlBtn) exportHtmlBtn.addEventListener('click', () => { this.exportAsPairedHtml(); });
+        if (exportHtmlBtn) exportHtmlBtn.addEventListener('click', () => { this.exportAsStandaloneHtml(); });
 
         
 
@@ -270,6 +355,43 @@ class ScoreAnalyzer {
         }
     }
 
+    handleStudentDetailKeydown(event) {
+        if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+            return;
+        }
+
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+            return;
+        }
+
+        const target = event.target;
+        const tagName = target && target.tagName ? target.tagName.toLowerCase() : '';
+        if (
+            (target && target.isContentEditable) ||
+            tagName === 'input' ||
+            tagName === 'textarea' ||
+            tagName === 'select'
+        ) {
+            return;
+        }
+
+        const studentsTab = document.getElementById('students-tab');
+        const detailViewBtn = document.getElementById('detailViewBtn');
+        const detailView = document.getElementById('detailView');
+        const studentSelect = document.getElementById('studentSelect');
+
+        const isStudentsTabActive = !!studentsTab && studentsTab.classList.contains('active');
+        const isDetailViewActive = !!detailViewBtn && detailViewBtn.classList.contains('active');
+        const isDetailViewVisible = !!detailView && detailView.style.display !== 'none';
+
+        if (!isStudentsTabActive || !isDetailViewActive || !isDetailViewVisible || !studentSelect || !studentSelect.value) {
+            return;
+        }
+
+        event.preventDefault();
+        this.navigateStudentDetail(event.key === 'ArrowLeft' ? -1 : 1);
+    }
+
     displayFileList(files) {
         const fileList = document.getElementById('fileList');
         fileList.innerHTML = '<h4>선택된 파일:</h4>';
@@ -299,6 +421,7 @@ class ScoreAnalyzer {
         this.showLoading();
         
         try {
+            await this.subjectGroupsReady;
             this.filesData.clear();
             
             for (const file of files) {
@@ -309,6 +432,7 @@ class ScoreAnalyzer {
             
             this.combineAllData();
             this.displayResults();
+            this.setIntroSectionVisible(false);
             this.hideLoading();
 
             // Enable export buttons after successful analysis
@@ -1362,6 +1486,9 @@ class ScoreAnalyzer {
         this.displaySubjectAverages();
         this.displayGradeAnalysis();
         this.displayStudentAnalysis();
+        if (document.querySelector('[data-tab="grade-analysis"]') && document.getElementById('grade-analysis-tab')) {
+            this.switchTab('grade-analysis');
+        }
     }
 
     // Export a complete deployment package with all files
@@ -1611,59 +1738,43 @@ class ScoreAnalyzer {
         return;
     }
 
-    // 현재 화면 상태 그대로(차트 포함) 정적인 HTML로 저장
-    async exportAsExactSnapshotHtml() {
-        if (!this.combinedData) {
-            this.showError('먼저 파일을 분석하세요.');
-            return;
-        }
+    async generateExactSnapshotHtmlTemplate() {
+        // 차트가 모두 그려지도록 보장 (애니메이션 없이 최신 상태로 업데이트)
+        await this.ensureChartsRendered();
+        // 렌더 안정화 대기(레이아웃/폰트/애니메이션 마무리)
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        await new Promise(r => setTimeout(r, 200));
 
-        try {
-            // 차트가 모두 그려지도록 보장 (애니메이션 없이 최신 상태로 업데이트)
-            await this.ensureChartsRendered();
-            // 렌더 안정화 대기(레이아웃/폰트/애니메이션 마무리)
-            await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-            await new Promise(r => setTimeout(r, 200));
-            // 1) 스타일 수집 (style.css 우선)
-            const cssContent = await this.getStyleCSS();
+        const cssContent = await this.getStyleCSS();
+        const container = document.querySelector('.container');
+        if (!container) throw new Error('내보낼 컨테이너를 찾을 수 없습니다.');
 
-            // 2) .container 복제
-            const container = document.querySelector('.container');
-            if (!container) throw new Error('내보낼 컨테이너를 찾을 수 없습니다.');
-            const containerClone = container.cloneNode(true);
+        const containerClone = container.cloneNode(true);
+        const origCanvases = container.querySelectorAll('canvas');
+        const cloneCanvases = containerClone.querySelectorAll('canvas');
 
-            // 3) 캔버스를 이미지로 교체 (현재 그려진 차트를 보존)
-            const origCanvases = container.querySelectorAll('canvas');
-            const cloneCanvases = containerClone.querySelectorAll('canvas');
-            for (let i = 0; i < cloneCanvases.length; i++) {
-                const srcCanvas = origCanvases[i];
-                const dstCanvas = cloneCanvases[i];
-                if (srcCanvas && dstCanvas && srcCanvas.toDataURL) {
-                    try {
-                        const img = document.createElement('img');
-                        img.src = srcCanvas.toDataURL('image/png');
-                        // 크기 보존: CSS 렌더 크기 기준
-                        const rect = srcCanvas.getBoundingClientRect();
-                        img.style.width = Math.max(1, Math.round(rect.width)) + 'px';
-                        img.style.height = Math.max(1, Math.round(rect.height)) + 'px';
-                        // 클래스/아이디 유지 (스타일 영향 최소화)
-                        img.className = dstCanvas.className || '';
-                        if (dstCanvas.id) img.id = dstCanvas.id;
-                        // 접근성 대체 텍스트
-                        img.alt = dstCanvas.getAttribute('aria-label') || 'chart-image';
-                        dstCanvas.replaceWith(img);
-                    } catch (_) {
-                        // 실패 시 캔버스 그대로 두기
-                    }
+        for (let i = 0; i < cloneCanvases.length; i++) {
+            const srcCanvas = origCanvases[i];
+            const dstCanvas = cloneCanvases[i];
+            if (srcCanvas && dstCanvas && srcCanvas.toDataURL) {
+                try {
+                    const img = document.createElement('img');
+                    img.src = srcCanvas.toDataURL('image/png');
+                    const rect = srcCanvas.getBoundingClientRect();
+                    img.style.width = Math.max(1, Math.round(rect.width)) + 'px';
+                    img.style.height = Math.max(1, Math.round(rect.height)) + 'px';
+                    img.className = dstCanvas.className || '';
+                    if (dstCanvas.id) img.id = dstCanvas.id;
+                    img.alt = dstCanvas.getAttribute('aria-label') || 'chart-image';
+                    dstCanvas.replaceWith(img);
+                } catch (_) {
+                    // 실패 시 캔버스 그대로 둔다.
                 }
             }
+        }
 
-            // 4) 불필요한 인터랙션 제거 (input/버튼은 그대로 두되 비활성화 옵션 가능)
-            // 여기서는 모양 보존이 목적이므로 구조만 유지
-
-            // 5) 최종 HTML 구성 (외부 스크립트/링크 제거하고 CSS는 인라인)
-            const title = document.title || '(2022개정) 고등학교 내신 분석 프로그램 Lite';
-            const html = `<!DOCTYPE html>
+        const title = document.title || '(2022개정) 고등학교 내신 분석 프로그램 Lite';
+        return `<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
@@ -1677,8 +1788,19 @@ ${cssContent}
 ${containerClone.outerHTML}
 </body>
 </html>`;
+    }
 
-            // 6) 다운로드 (BOM 포함: 한글 표시 안전)
+    // 현재 화면 상태 그대로(차트 포함) 정적인 HTML로 저장
+    async exportAsExactSnapshotHtml() {
+        if (!this.combinedData) {
+            this.showError('먼저 파일을 분석하세요.');
+            return;
+        }
+
+        try {
+            const html = await this.generateExactSnapshotHtmlTemplate();
+
+            // 다운로드 (BOM 포함: 한글 표시 안전)
             const BOM = '\uFEFF';
             const blob = new Blob([BOM + html], { type: 'text/html;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
@@ -1934,6 +2056,8 @@ class ScoreAnalyzer {
         
         if (this.combinedData) {
             console.log('사전 로드된 데이터 발견:', this.combinedData);
+            const introHeader = document.querySelector('.container > header');
+            if (introHeader) introHeader.style.display = 'none';
             const upload = document.querySelector('.upload-section');
             if (upload) upload.style.display = 'none';
             const results = document.getElementById('results');
@@ -1970,6 +2094,9 @@ class ScoreAnalyzer {
         this.displaySubjectAverages();
         this.displayGradeAnalysis();
         this.displayStudentAnalysis();
+        if (document.querySelector('[data-tab="grade-analysis"]') && document.getElementById('grade-analysis-tab')) {
+            this.switchTab('grade-analysis');
+        }
     }
     
     displaySubjectAverages() {
@@ -4205,7 +4332,7 @@ document.addEventListener('DOMContentLoaded', () => {
                            String(now.getHours()).padStart(2, '0') + 
                            String(now.getMinutes()).padStart(2, '0');
             
-            link.setAttribute('download', `학생성적분석결과_${dateStr}.html`);
+            link.setAttribute('download', `index_${dateStr}.html`);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
@@ -4220,9 +4347,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    getRuntimeScriptText() {
+        try {
+            if (typeof ScoreAnalyzer === 'function') {
+                return `${ScoreAnalyzer.toString()}
+
+let scoreAnalyzer;
+
+document.addEventListener('DOMContentLoaded', () => {
+    scoreAnalyzer = new ScoreAnalyzer();
+});
+`;
+            }
+        } catch (error) {
+            console.warn('실행 중인 ScoreAnalyzer 소스 추출 실패:', error);
+        }
+
+        return '';
+    }
+
+    escapeInlineScriptContent(text) {
+        if (!text) return '';
+        return String(text).replace(/<\/script/gi, '<\\/script');
+    }
+
     // 독립형 HTML 템플릿 생성
     async generateStandaloneHtmlTemplate() {
         const analysisData = JSON.stringify(this.combinedData);
+        const subjectGroupsData = JSON.stringify(this.subjectGroups || null);
+        const uiState = JSON.stringify(this.getCurrentUiState());
 
         // 원본 index.html, style.css, script.js를 그대로 사용하여 완전 동일한 구조로 생성
         const fetchText = async (url) => {
@@ -4236,9 +4389,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        const [indexHtml, cssText, jsText, xlsx, chart, datalabels, jszip, jspdf, html2canvas] = await Promise.all([
+        const [indexHtml, jsText, xlsx, chart, datalabels, jszip, jspdf, html2canvas] = await Promise.all([
             fetchText('index.html'),
-            fetchText('style.css'),
             fetchText('script.js'),
             fetchText('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'),
             fetchText('https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js'),
@@ -4247,9 +4399,11 @@ document.addEventListener('DOMContentLoaded', () => {
             fetchText('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
             fetchText('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
         ]);
+        const cssText = await this.getStyleCSS();
+        const runtimeJsText = (jsText && jsText.trim()) ? jsText : this.getRuntimeScriptText();
 
         // DOMParser로 원본 index.html을 파싱하여 안전하게 조작
-        const htmlSource = indexHtml || document.documentElement.outerHTML;
+        const htmlSource = document.documentElement?.outerHTML || indexHtml;
         const parser = new DOMParser();
         const doc = parser.parseFromString(htmlSource, 'text/html');
 
@@ -4277,7 +4431,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const srcAttr = s.getAttribute('src');
             if (inlineMap.has(srcAttr) && inlineMap.get(srcAttr)) {
                 const inline = doc.createElement('script');
-                inline.textContent = inlineMap.get(srcAttr);
+                inline.textContent = this.escapeInlineScriptContent(inlineMap.get(srcAttr));
                 s.replaceWith(inline);
             }
         });
@@ -4286,11 +4440,13 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const appScript = doc.querySelector('script[src="script.js"]');
             const preload = doc.createElement('script');
-            preload.textContent = `window.APP_BUILD_UTC = new Date().toISOString();\nwindow.PRELOADED_DATA = ${analysisData};`;
+            preload.textContent = this.escapeInlineScriptContent(`window.APP_BUILD_UTC = new Date().toISOString();\nwindow.PRELOADED_DATA = ${analysisData};\nwindow.PRELOADED_SUBJECT_GROUPS = ${subjectGroupsData};\nwindow.PRELOADED_UI_STATE = ${uiState};`);
             const inline = doc.createElement('script');
-            // jsText가 없을 때는 독립형 Standalone 스크립트(getScriptJS)로 대체하여 동일 렌더링 보장
-            const inlineJs = jsText && jsText.trim() ? jsText : (this.getScriptJS ? (await this.getScriptJS()) : '');
-            inline.textContent = inlineJs;
+            if (!runtimeJsText || !runtimeJsText.trim()) {
+                console.warn('동작 스크립트를 확보하지 못해 현재 화면 스냅샷으로 저장합니다.');
+                return await this.generateExactSnapshotHtmlTemplate();
+            }
+            inline.textContent = this.escapeInlineScriptContent(runtimeJsText);
             if (appScript) {
                 appScript.replaceWith(preload);
                 preload.after(inline);
@@ -4346,296 +4502,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 내장 CSS 스타일
     getBuiltInCSS() {
-        return `
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(180deg, #f7f9fc 0%, #eef2f7 100%);
-    min-height: 100vh;
-    padding: 20px;
-}
-
-.container {
-    max-width: 1200px;
-    margin: 0 auto;
-    background: white;
-    border-radius: 15px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-    overflow: hidden;
-}
-
-header {
-    background: #8fbaf7;
-    color: white;
-    padding: 40px;
-    text-align: center;
-}
-
-header h1 {
-    font-size: 2.5rem;
-    margin-bottom: 10px;
-    font-weight: 300;
-}
-
-.badge-lite {
-    display: inline-block;
-    margin-left: 10px;
-    padding: 4px 10px;
-    font-size: 0.9rem;
-    font-weight: 700;
-    color: #ffffff;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 999px;
-    letter-spacing: 0.3px;
-}
-
-.results-section {
-    padding: 40px;
-}
-
-.tabs {
-    display: flex;
-    border-bottom: 1px solid #ddd;
-    margin-bottom: 30px;
-}
-
-.tab-btn {
-    padding: 12px 24px;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    font-size: 16px;
-    border-bottom: 3px solid transparent;
-    transition: all 0.3s ease;
-}
-
-.tab-btn:hover {
-    background-color: #f5f5f5;
-}
-
-.tab-btn.active {
-    background-color: #8fbaf7;
-    color: white;
-    border-bottom-color: #667eea;
-}
-
-.tab-content {
-    display: none;
-}
-
-.tab-content.active {
-    display: block;
-}
-
-.subject-averages {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 20px;
-    margin-top: 20px;
-}
-
-.subject-card {
-    background: #f9f9f9;
-    padding: 20px;
-    border-radius: 8px;
-    border-left: 4px solid #8fbaf7;
-}
-
-.subject-name {
-    font-weight: bold;
-    font-size: 1.1rem;
-    margin-bottom: 10px;
-}
-
-.grade-analysis-container {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 30px;
-    margin-top: 20px;
-}
-
-.chart-section {
-    background: #f9f9f9;
-    padding: 20px;
-    border-radius: 8px;
-}
-
-.stats-section {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 20px;
-    margin-top: 20px;
-}
-
-.stat-item {
-    background: white;
-    padding: 20px;
-    border-radius: 8px;
-    text-align: center;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.stat-label {
-    display: block;
-    font-size: 0.9rem;
-    color: #666;
-    margin-bottom: 5px;
-}
-
-.stat-value {
-    font-size: 1.5rem;
-    font-weight: bold;
-    color: #8fbaf7;
-}
-
-.student-analysis {
-    margin-top: 20px;
-}
-
-.student-selector {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 15px;
-    margin-bottom: 20px;
-    padding: 20px;
-    background: #f9f9f9;
-    border-radius: 8px;
-}
-
-.selector-group {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-}
-
-.selector-group label {
-    font-weight: bold;
-    font-size: 0.9rem;
-}
-
-.selector {
-    padding: 8px 12px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    font-size: 14px;
-}
-
-.detail-btn {
-    padding: 8px 16px;
-    background: #8fbaf7;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-}
-
-.detail-btn:disabled {
-    background: #ccc;
-    cursor: not-allowed;
-}
-
-.view-toggle {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
-}
-
-.toggle-btn {
-    padding: 10px 20px;
-    border: 1px solid #8fbaf7;
-    background: white;
-    color: #8fbaf7;
-    cursor: pointer;
-    border-radius: 4px;
-}
-
-.toggle-btn.active {
-    background: #8fbaf7;
-    color: white;
-}
-
-.search-box {
-    margin-bottom: 20px;
-}
-
-.search-box input {
-    width: 100%;
-    padding: 12px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    font-size: 16px;
-}
-
-.student-table {
-    overflow-x: auto;
-}
-
-.student-table table {
-    width: 100%;
-    border-collapse: collapse;
-    background: white;
-}
-
-.student-table th,
-.student-table td {
-    padding: 12px;
-    text-align: left;
-    border-bottom: 1px solid #ddd;
-}
-
-.student-table th {
-    background: #8fbaf7;
-    color: white;
-    font-weight: bold;
-}
-
-.student-table tr:hover {
-    background: #f5f5f5;
-}
-
-.app-footer {
-    background: #f8f9fa;
-    padding: 20px 40px;
-    border-top: 1px solid #eee;
-    text-align: center;
-    font-size: 0.9rem;
-    color: #666;
-}
-
-.footer-right {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 20px;
-    flex-wrap: wrap;
-}
-
-@media (max-width: 768px) {
-    .grade-analysis-container {
-        grid-template-columns: 1fr;
-    }
-    
-    .stats-section {
-        grid-template-columns: repeat(2, 1fr);
-    }
-    
-    .student-selector {
-        flex-direction: column;
-    }
-    
-    .footer-right {
-        flex-direction: column;
-        gap: 10px;
-    }
-}
-        `;
+        return "/* ========================================\n   Modern Clean Theme\n   ======================================== */\n\n:root {\n    --primary: #10A37F;\n    --primary-light: #14B88F;\n    --primary-dark: #0B7A5F;\n    --primary-bg: rgba(16, 163, 127, 0.08);\n\n    --accent: #0F766E;\n    --accent-light: #14B8A6;\n    --accent-muted: #CCFBF1;\n    --accent-bg: rgba(15, 118, 110, 0.08);\n\n    --neutral-50: #FCFDFE;\n    --neutral-100: #F8FAFC;\n    --neutral-200: #EEF2F6;\n    --neutral-300: #DCE3EA;\n    --neutral-400: #B6C0CC;\n    --neutral-500: #7A8797;\n    --neutral-600: #556171;\n    --neutral-700: #334155;\n    --neutral-800: #0F172A;\n\n    --success: #15803D;\n    --success-light: #16A34A;\n    --success-bg: rgba(21, 128, 61, 0.1);\n\n    --info: #2563EB;\n    --info-light: #3B82F6;\n    --info-bg: rgba(37, 99, 235, 0.1);\n\n    --warning: #D97706;\n    --warning-light: #F59E0B;\n    --warning-bg: rgba(217, 119, 6, 0.12);\n\n    --bg-body: radial-gradient(circle at top, #FFFFFF 0%, #F6F8FA 42%, #EEF2F6 100%);\n    --bg-card: #FFFFFF;\n    --bg-card-hover: #FFFFFF;\n    --bg-section: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);\n\n    --text-primary: #0F172A;\n    --text-secondary: #475569;\n    --text-muted: #64748B;\n    --text-inverse: #FFFFFF;\n\n    --border-light: rgba(15, 23, 42, 0.08);\n    --border-medium: rgba(15, 23, 42, 0.14);\n    --border-accent: rgba(16, 163, 127, 0.18);\n\n    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);\n    --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.06);\n    --shadow-lg: 0 16px 36px rgba(15, 23, 42, 0.08);\n    --shadow-xl: 0 24px 64px rgba(15, 23, 42, 0.1);\n\n    --radius-sm: 10px;\n    --radius-md: 14px;\n    --radius-lg: 20px;\n    --radius-xl: 28px;\n\n    --grade-1: #15803D;\n    --grade-2: #0F766E;\n    --grade-3: #0369A1;\n    --grade-4: #D97706;\n    --grade-5: #7A8797;\n}\n\n* {\n    margin: 0;\n    padding: 0;\n    box-sizing: border-box;\n}\n\nbody {\n    font-family: 'Pretendard Variable', 'Pretendard', 'SUIT Variable', 'Noto Sans KR', sans-serif;\n    background: var(--bg-body);\n    min-height: 100vh;\n    padding: 18px;\n    position: relative;\n    overflow-x: hidden;\n    color: var(--text-primary);\n}\n\n.container {\n    max-width: 1320px;\n    margin: 0 auto;\n    background: var(--bg-card);\n    border-radius: var(--radius-xl);\n    box-shadow: var(--shadow-xl);\n    overflow: hidden;\n    position: relative;\n    border: 1px solid var(--border-light);\n}\n\nheader {\n    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);\n    color: var(--text-primary);\n    padding: 28px 36px 24px;\n    text-align: left;\n    border-bottom: 1px solid var(--neutral-200);\n}\n\nheader h1 {\n    font-size: 2rem;\n    margin-bottom: 6px;\n    font-weight: 600;\n    letter-spacing: -0.04em;\n    position: relative;\n}\n\n.header-subtitle {\n    font-size: 1rem;\n    color: var(--text-secondary);\n    max-width: 720px;\n    line-height: 1.6;\n}\n\n.badge-lite {\n    display: inline-block;\n    margin-left: 10px;\n    padding: 4px 10px;\n    font-size: 0.74rem;\n    font-weight: 600;\n    color: var(--text-secondary);\n    background: var(--neutral-100);\n    border: 1px solid var(--neutral-300);\n    border-radius: 999px;\n    letter-spacing: 0.08em;\n    vertical-align: middle;\n    text-transform: uppercase;\n}\n\n.upload-section {\n    padding: 32px 36px;\n    text-align: center;\n    border-bottom: 1px solid var(--neutral-200);\n    position: relative;\n    background: linear-gradient(180deg, var(--neutral-50) 0%, var(--bg-card) 100%);\n}\n\n.container.post-analysis > header,\n.container.post-analysis .upload-guide,\n.container.post-analysis .section-divider,\n.container.post-analysis .file-input-wrapper,\n.container.post-analysis #fileList,\n.container.post-analysis #analyzeBtn {\n    display: none !important;\n}\n\n.file-input-wrapper {\n    margin-bottom: 30px;\n}\n\n.file-input-wrapper input[type=\"file\"] {\n    display: none;\n}\n\n.file-input-label {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    width: min(100%, 720px);\n    min-height: 88px;\n    margin: 0 auto;\n    padding: 18px 28px;\n    background: var(--bg-card);\n    border: 1.5px dashed var(--neutral-300);\n    border-radius: var(--radius-lg);\n    cursor: pointer;\n    transition: all 0.25s ease;\n    font-size: 1rem;\n    font-weight: 500;\n    color: var(--text-primary);\n}\n\n.upload-hint {\n    margin-top: 12px;\n    font-size: 0.9rem;\n    color: var(--text-muted);\n}\n\n.file-input-label:hover {\n    background: var(--neutral-50);\n    border-color: var(--primary);\n    color: var(--primary-dark);\n}\n\n.file-input-label.dragover {\n    background: var(--primary-bg);\n    border-color: var(--primary);\n    color: var(--primary);\n    box-shadow: 0 0 0 4px var(--primary-bg) inset;\n}\n\n/* 업로드 섹션 전체 드래그오버 강조 및 오버레이 안내 */\n.upload-section.dragover {\n    border: 1.5px dashed var(--primary);\n    border-radius: var(--radius-lg);\n    background: var(--primary-bg);\n}\n.upload-section.dragover::after {\n    content: '여기에 파일을 드롭하세요';\n    position: absolute;\n    left: 50%;\n    top: 50%;\n    transform: translate(-50%, -50%);\n    color: var(--primary);\n    font-weight: 600;\n    font-size: 1rem;\n    padding: 12px 18px;\n    background: var(--bg-card);\n    border: 1px solid var(--primary-light);\n    border-radius: var(--radius-sm);\n    pointer-events: none;\n    box-shadow: var(--shadow-lg);\n}\n\n.analyze-btn {\n    background: var(--primary);\n    color: var(--text-inverse);\n    border: 1px solid transparent;\n    padding: 12px 22px;\n    border-radius: 999px;\n    font-size: 0.95rem;\n    font-weight: 600;\n    cursor: pointer;\n    transition: all 0.25s ease;\n    box-shadow: none;\n}\n\n.analyze-btn:hover:not(:disabled) {\n    transform: translateY(-2px);\n    box-shadow: var(--shadow-md);\n    background: var(--primary-dark);\n}\n\n.analyze-btn:active:not(:disabled) {\n    transform: translateY(0);\n}\n\n.analyze-btn:disabled {\n    opacity: 0.5;\n    cursor: not-allowed;\n    background: var(--neutral-400);\n    box-shadow: none;\n}\n\n.action-buttons {\n    display: flex;\n    justify-content: center;\n    gap: 10px;\n    flex-wrap: wrap;\n}\n\n.secondary-btn {\n    background: var(--bg-card);\n    color: var(--text-primary);\n    border-color: var(--neutral-300);\n}\n\n.secondary-btn:hover:not(:disabled) {\n    background: var(--neutral-100);\n    color: var(--text-primary);\n    box-shadow: var(--shadow-sm);\n}\n\n.export-btn {\n    background: var(--bg-card);\n    color: var(--primary);\n    border: 2px solid var(--primary);\n    padding: 13px 32px;\n    border-radius: var(--radius-lg);\n    font-size: 1rem;\n    cursor: pointer;\n    transition: all 0.25s ease;\n}\n\n.export-btn:hover:not(:disabled) {\n    background: var(--primary);\n    color: var(--text-inverse);\n    transform: translateY(-2px);\n    box-shadow: var(--shadow-lg);\n}\n\n.export-btn:disabled {\n    opacity: 0.5;\n    cursor: not-allowed;\n}\n\n.upload-guide {\n    background: var(--bg-card);\n    border: 1px solid var(--neutral-200);\n    padding: 22px 24px;\n    margin: 0 auto 18px;\n    border-radius: var(--radius-lg);\n    box-shadow: var(--shadow-sm);\n    max-width: 920px;\n    text-align: left;\n}\n\n.upload-guide p {\n    margin: 0;\n    color: var(--text-secondary);\n    line-height: 1.6;\n}\n\n.guide-title {\n    color: var(--text-primary);\n    margin-bottom: 8px !important;\n    font-size: 1rem;\n    font-weight: 700;\n}\n\n.upload-guide strong {\n    color: var(--text-primary);\n}\n\n.section-divider {\n    height: 1px;\n    background: linear-gradient(90deg, rgba(0,0,0,0.06), rgba(0,0,0,0.12), rgba(0,0,0,0.06));\n    margin: 16px 0 22px 0;\n    border: none;\n}\n\n.warning-text {\n    color: var(--warning);\n    font-weight: 600;\n    font-size: 0.95rem;\n    margin-top: 10px;\n    text-align: left;\n    padding: 8px 12px;\n    background-color: var(--warning-bg);\n    border-radius: var(--radius-md);\n    border-left: 4px solid var(--warning);\n}\n\n/* 강조 색상: XLS vs XLS data 구분 표시 */\n.warning-text .xls {\n    color: var(--warning);\n    background: rgba(217, 119, 6, 0.12);\n    padding: 2px 8px;\n    border-radius: 4px;\n    font-weight: 800;\n}\n.warning-text .xlsdata {\n    color: var(--success);\n    background: var(--success-bg);\n    padding: 2px 8px;\n    border-radius: 4px;\n    font-weight: 800;\n}\n\n.privacy-notice {\n    margin-top: 10px;\n    padding: 14px 16px;\n    border-radius: var(--radius-md);\n    background: var(--neutral-100);\n    border: 1px solid var(--neutral-200);\n    color: var(--text-secondary);\n}\n.privacy-notice p {\n    margin: 0 0 8px 0;\n    font-weight: 600;\n    color: var(--text-primary);\n}\n.privacy-notice ul {\n    margin: 0;\n    padding-left: 18px;\n    list-style: disc;\n    color: var(--text-secondary);\n}\n.privacy-notice li {\n    margin: 3px 0;\n    line-height: 1.5;\n}\n.privacy-notice .privacy-footnote {\n    color: var(--text-muted);\n    opacity: 1;\n    margin-top: 8px;\n}\n\n.results-section {\n    padding: 28px 36px 36px;\n}\n\n/* 하단 크레딧 푸터 */\n.app-footer {\n    padding: 16px 36px 24px 36px;\n    display: flex;\n    align-items: center;\n    justify-content: flex-end;\n    border-top: 1px solid var(--neutral-200);\n}\n.app-footer .footer-right {\n    display: flex;\n    align-items: center;\n    gap: 12px;\n}\n.app-footer .credits {\n    text-align: right;\n    font-size: 0.85rem;\n    color: var(--text-secondary);\n    background: none;\n    padding: 0;\n    border-radius: 0;\n}\n.app-footer .credits a:not(.help-btn) {\n    color: var(--text-muted);\n    text-decoration: none;\n    border-bottom: 1px dashed var(--neutral-400);\n}\n.app-footer .credits a:not(.help-btn):hover {\n    color: var(--text-primary);\n    border-bottom-color: var(--neutral-500);\n}\n\n/* last updated 표시 */\n.app-footer .updated {\n    font-size: 0.8rem;\n    color: var(--text-muted);\n    margin-left: 8px;\n}\n\n/* 도움말 버튼 */\n.help-btn {\n    display: inline-block;\n    padding: 8px 14px;\n    font-size: 0.85rem;\n    line-height: 1;\n    border-radius: 999px;\n    color: var(--text-primary);\n    background: var(--bg-card);\n    border: 1px solid var(--neutral-300);\n    text-decoration: none;\n    transition: all 0.2s ease;\n}\n.help-btn:hover {\n    color: var(--primary-dark);\n    background: var(--neutral-100);\n    border-color: var(--primary);\n    box-shadow: var(--shadow-sm);\n}\n\n.tabs {\n    display: inline-flex;\n    gap: 6px;\n    padding: 6px;\n    background: var(--neutral-100);\n    border: 1px solid var(--neutral-200);\n    border-radius: 16px;\n    margin-bottom: 30px;\n}\n\n.tab-btn {\n    flex: none;\n    min-width: 128px;\n    padding: 12px 18px;\n    background: none;\n    border: none;\n    cursor: pointer;\n    font-size: 0.95rem;\n    font-weight: 500;\n    color: var(--text-secondary);\n    transition: all 0.25s ease;\n    border-radius: 12px;\n    position: relative;\n}\n\n.tab-btn.active {\n    color: var(--text-primary);\n    background: var(--bg-card);\n    box-shadow: var(--shadow-sm);\n}\n\n.tab-btn:hover:not(.active) {\n    background: rgba(255, 255, 255, 0.6);\n    color: var(--text-primary);\n}\n\n.tab-content {\n    display: none;\n}\n\n.tab-content.active {\n    display: block;\n}\n\n.tab-content h2 {\n    color: var(--text-primary);\n    margin-bottom: 22px;\n    font-size: 1.45rem;\n    font-weight: 600;\n}\n\n\n.subject-averages {\n    display: grid;\n    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));\n    gap: 20px;\n}\n\n.subject-item {\n    background: linear-gradient(180deg, var(--bg-card) 0%, var(--neutral-50) 100%);\n    border-radius: var(--radius-lg);\n    padding: 22px;\n    border: 1px solid var(--neutral-200);\n    transition: all 0.25s ease;\n    box-shadow: none;\n}\n\n.subject-item:hover {\n    transform: translateY(-2px);\n    box-shadow: var(--shadow-md);\n}\n\n.subject-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    margin-bottom: 15px;\n}\n\n.subject-header h3 {\n    color: var(--text-primary);\n    font-size: 1.15rem;\n    font-weight: 600;\n}\n\n.credits {\n    background: var(--neutral-100);\n    color: var(--text-secondary);\n    padding: 5px 10px;\n    border-radius: 15px;\n    border: 1px solid var(--neutral-200);\n    font-size: 0.8rem;\n    font-weight: 500;\n}\n\n.average-score {\n    text-align: center;\n}\n\n.average-score .score {\n    display: block;\n    font-size: 2.2rem;\n    font-weight: 600;\n    color: var(--text-primary);\n    margin-bottom: 5px;\n}\n\n.average-score .label {\n    color: var(--text-secondary);\n    font-size: 0.9rem;\n    text-transform: uppercase;\n    letter-spacing: 1px;\n}\n\n.achievement-bars {\n    margin-top: 20px;\n    padding-top: 20px;\n    border-top: 1px solid var(--neutral-200);\n}\n\n.achievement-bar {\n    display: flex;\n    align-items: center;\n    gap: 10px;\n    margin-bottom: 8px;\n}\n\n.achievement-label {\n    width: 25px;\n    font-weight: 600;\n    color: var(--text-primary);\n    font-size: 0.9rem;\n    text-align: center;\n}\n\n.achievement-bar-container {\n    flex: 1;\n    height: 20px;\n    background: var(--neutral-200);\n    border-radius: 10px;\n    overflow: hidden;\n    position: relative;\n}\n\n.achievement-bar-fill {\n    height: 100%;\n    border-radius: 10px;\n    transition: width 0.8s ease;\n    min-width: 2px;\n}\n\n.achievement-bar:nth-child(1) .achievement-bar-fill { background: linear-gradient(135deg, var(--success), var(--success-light)); }\n.achievement-bar:nth-child(2) .achievement-bar-fill { background: linear-gradient(135deg, var(--info), var(--info-light)); }\n.achievement-bar:nth-child(3) .achievement-bar-fill { background: linear-gradient(135deg, var(--accent), var(--accent-light)); }\n.achievement-bar:nth-child(4) .achievement-bar-fill { background: linear-gradient(135deg, var(--warning), var(--primary-light)); }\n.achievement-bar:nth-child(5) .achievement-bar-fill { background: linear-gradient(135deg, var(--primary), var(--primary-dark)); }\n\n.achievement-percentage {\n    width: 50px;\n    text-align: right;\n    font-weight: 500;\n    color: var(--text-primary);\n    font-size: 0.85rem;\n}\n\n.achievement-distribution {\n    display: grid;\n    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));\n    gap: 30px;\n}\n\n.distribution-item {\n    background: var(--bg-card);\n    border-radius: var(--radius-md);\n    padding: 25px;\n    box-shadow: var(--shadow-sm);\n    transition: all 0.25s ease;\n}\n\n.distribution-item:hover {\n    transform: translateY(-2px);\n    box-shadow: var(--shadow-md);\n}\n\n.distribution-item h3 {\n    color: var(--text-primary);\n    margin-bottom: 20px;\n    font-size: 1.3rem;\n    font-weight: 500;\n}\n\n.distribution-bars {\n    display: flex;\n    flex-direction: column;\n    gap: 15px;\n}\n\n.grade-bar {\n    display: flex;\n    align-items: center;\n    gap: 15px;\n}\n\n.grade-label {\n    width: 30px;\n    font-weight: 600;\n    color: var(--text-primary);\n    font-size: 1.1rem;\n}\n\n.bar-container {\n    flex: 1;\n    height: 25px;\n    background: var(--neutral-200);\n    border-radius: 15px;\n    overflow: hidden;\n    position: relative;\n}\n\n.bar {\n    height: 100%;\n    background: linear-gradient(135deg, var(--info) 0%, var(--info-light) 100%);\n    border-radius: 15px;\n    transition: width 0.8s ease;\n    min-width: 2px;\n}\n\n.percentage {\n    width: 60px;\n    text-align: right;\n    font-weight: 500;\n    color: var(--text-primary);\n}\n\n.student-analysis {\n    width: 100%;\n}\n\n.search-box {\n    margin-bottom: 25px;\n}\n\n.search-box input {\n    width: 100%;\n    max-width: 400px;\n    padding: 14px 18px;\n    border: 1px solid var(--neutral-300);\n    border-radius: 14px;\n    font-size: 1rem;\n    outline: none;\n    transition: all 0.25s ease;\n    background: var(--bg-card);\n}\n\n.search-box input:focus {\n    border-color: var(--primary);\n    box-shadow: 0 0 0 3px var(--primary-bg);\n}\n\n.students-grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));\n    gap: 18px;\n    margin-top: 20px;\n}\n\n.student-card {\n    background: var(--bg-card);\n    border-radius: var(--radius-lg);\n    box-shadow: none;\n    border: 1px solid var(--neutral-200);\n    transition: all 0.25s ease;\n    overflow: hidden;\n}\n\n.student-card:hover {\n    transform: translateY(-2px);\n    box-shadow: var(--shadow-md);\n}\n\n.student-card-header {\n    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);\n    color: var(--text-primary);\n    padding: 18px 20px;\n    display: flex;\n    justify-content: space-between;\n    align-items: flex-start;\n    border-bottom: 1px solid var(--neutral-200);\n}\n\n.student-basic-info h4 {\n    margin: 0 0 5px 0;\n    font-size: 1.3rem;\n    font-weight: 600;\n}\n\n.student-number {\n    font-size: 0.88rem;\n    color: var(--text-secondary);\n    opacity: 1;\n}\n\n.student-summary {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.summary-row {\n    display: flex;\n    gap: 15px;\n    flex-wrap: wrap;\n}\n\n.summary-metric-inline {\n    display: flex;\n    align-items: center;\n    gap: 6px;\n    background: var(--neutral-100);\n    border: 1px solid var(--neutral-200);\n    padding: 6px 10px;\n    border-radius: 6px;\n    min-width: fit-content;\n}\n\n.summary-metric-inline .metric-label {\n    font-size: 0.7rem;\n    color: var(--text-muted);\n    text-transform: uppercase;\n    letter-spacing: 0.5px;\n    white-space: nowrap;\n}\n\n.summary-metric-inline .metric-value {\n    font-size: 0.9rem;\n    font-weight: 700;\n    white-space: nowrap;\n    color: var(--text-primary);\n}\n\n.summary-metric {\n    text-align: center;\n    background: rgba(255, 255, 255, 0.15);\n    padding: 8px 12px;\n    border-radius: 8px;\n    min-width: 70px;\n}\n\n.summary-metric .metric-label {\n    display: block;\n    font-size: 0.7rem;\n    opacity: 0.8;\n    margin-bottom: 2px;\n    text-transform: uppercase;\n    letter-spacing: 0.5px;\n}\n\n.summary-metric .metric-value {\n    display: block;\n    font-size: 1.1rem;\n    font-weight: 700;\n}\n\n.student-subjects {\n    padding: 15px 20px;\n    max-height: none;\n    overflow: visible;\n}\n\n.subject-row {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 8px 0;\n    border-bottom: 1px solid var(--neutral-200);\n}\n\n.subject-row:last-child {\n    border-bottom: none;\n}\n\n.subject-row.no-grade {\n    opacity: 0.7;\n}\n\n.subject-name {\n    font-weight: 500;\n    color: var(--text-primary);\n    flex: 1;\n    font-size: 0.9rem;\n}\n\n.subject-data {\n    display: flex;\n    gap: 8px;\n    align-items: center;\n}\n\n.subject-score {\n    font-weight: 600;\n    color: var(--primary);\n    font-size: 0.85rem;\n    min-width: 45px;\n    text-align: right;\n}\n\n.subject-achievement {\n    font-size: 0.8rem;\n    padding: 2px 6px;\n    border-radius: 3px;\n    min-width: 20px;\n    text-align: center;\n}\n\n.subject-grade {\n    font-weight: 500;\n    color: var(--text-secondary);\n    font-size: 0.8rem;\n    min-width: 35px;\n    text-align: center;\n}\n\n.subject-percentile {\n    font-weight: 500;\n    color: var(--success);\n    font-size: 0.8rem;\n    min-width: 40px;\n    text-align: right;\n}\n\n.student-card-footer {\n    background: var(--bg-card);\n    padding: 15px 20px;\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-top: 1px solid var(--neutral-200);\n}\n\n.grade-subjects-count {\n    font-size: 0.85rem;\n    color: var(--text-secondary);\n}\n\n.view-detail-btn {\n    background: var(--bg-card);\n    color: var(--text-primary);\n    border: 1px solid var(--neutral-300);\n    padding: 8px 16px;\n    border-radius: var(--radius-sm);\n    font-size: 0.85rem;\n    cursor: pointer;\n    transition: all 0.25s ease;\n    font-weight: 500;\n}\n\n.view-detail-btn:hover {\n    transform: translateY(-1px);\n    border-color: var(--primary);\n    color: var(--primary-dark);\n    box-shadow: var(--shadow-sm);\n}\n\n.achievement.A {\n    background: var(--success);\n    color: var(--text-inverse);\n    font-weight: bold;\n    padding: 4px 8px;\n    border-radius: 4px;\n}\n\n.achievement.B {\n    background: var(--info);\n    color: var(--text-inverse);\n    font-weight: bold;\n    padding: 4px 8px;\n    border-radius: 4px;\n}\n\n.achievement.C {\n    background: var(--accent);\n    color: var(--text-inverse);\n    font-weight: bold;\n    padding: 4px 8px;\n    border-radius: 4px;\n}\n\n.achievement.D {\n    background: var(--warning);\n    color: var(--text-inverse);\n    font-weight: bold;\n    padding: 4px 8px;\n    border-radius: 4px;\n}\n\n.achievement.E, .achievement.미도달 {\n    background: var(--primary);\n    color: var(--text-inverse);\n    font-weight: bold;\n    padding: 4px 8px;\n    border-radius: 4px;\n}\n\n.score {\n    font-weight: 600;\n    color: var(--text-primary);\n}\n\n.grade {\n    text-align: center;\n    font-weight: 500;\n}\n\n.rank {\n    text-align: center;\n    font-weight: 500;\n    color: var(--text-secondary);\n}\n\n.avg-grade {\n    text-align: center;\n    font-weight: 600;\n    color: var(--primary);\n    font-size: 1.1rem;\n}\n\n.grade-analysis-container {\n    display: grid;\n    grid-template-columns: 1fr 1fr;\n    grid-template-rows: auto auto;\n    gap: 20px;\n    margin-bottom: 30px;\n}\n\n.chart-section {\n    background: linear-gradient(180deg, var(--bg-card) 0%, var(--neutral-50) 100%);\n    border-radius: var(--radius-lg);\n    padding: 22px;\n    text-align: center;\n    border: 1px solid var(--neutral-200);\n}\n\n.chart-section h3 {\n    color: var(--text-primary);\n    margin-bottom: 20px;\n    font-size: 1.3rem;\n    font-weight: 500;\n}\n\n.chart-section canvas {\n    max-width: 100%;\n    height: 350px !important;\n}\n\n.stats-section {\n    grid-column: 1 / -1;\n    display: grid;\n    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));\n    gap: 16px;\n    background: linear-gradient(180deg, var(--bg-card) 0%, var(--neutral-50) 100%);\n    border-radius: var(--radius-lg);\n    padding: 22px;\n    border: 1px solid var(--neutral-200);\n}\n\n.stat-item {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n    text-align: center;\n    background: var(--bg-card);\n    border-radius: var(--radius-md);\n    padding: 20px;\n    box-shadow: none;\n    border: 1px solid var(--neutral-200);\n}\n\n.stat-label {\n    color: var(--text-secondary);\n    font-size: 0.9rem;\n    text-transform: uppercase;\n    letter-spacing: 1px;\n    margin-bottom: 8px;\n}\n\n.stat-value {\n    color: var(--text-primary);\n    font-size: 2rem;\n    font-weight: 600;\n}\n\n@media (max-width: 768px) {\n    .grade-analysis-container {\n        grid-template-columns: 1fr;\n        gap: 20px;\n    }\n    \n    .stats-section {\n        grid-template-columns: repeat(2, 1fr);\n        gap: 15px;\n    }\n    \n    .chart-section {\n        padding: 15px;\n    }\n    \n    .stat-item {\n        padding: 15px;\n    }\n    \n    .stat-value {\n        font-size: 1.5rem;\n    }\n}\n\n.loading {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n    justify-content: center;\n    padding: 60px;\n    color: var(--text-secondary);\n}\n\n.spinner {\n    width: 50px;\n    height: 50px;\n    border: 4px solid var(--neutral-200);\n    border-top: 4px solid var(--primary);\n    border-radius: 50%;\n    animation: spin 1s linear infinite;\n    margin-bottom: 20px;\n}\n\n@keyframes spin {\n    0% { transform: rotate(0deg); }\n    100% { transform: rotate(360deg); }\n}\n\n.loading p {\n    font-size: 1.1rem;\n    color: var(--text-secondary);\n}\n\n.error-message {\n    background: var(--warning-bg);\n    color: var(--warning);\n    padding: 20px;\n    margin: 20px 40px;\n    border-radius: var(--radius-md);\n    border-left: 5px solid var(--warning);\n    font-size: 1rem;\n}\n\n.file-list {\n    background: var(--neutral-100);\n    border-radius: var(--radius-lg);\n    padding: 20px;\n    margin: 20px 0;\n    border: 1px solid var(--neutral-200);\n}\n\n.file-list h4 {\n    color: var(--text-primary);\n    margin-bottom: 15px;\n    font-size: 1.1rem;\n}\n\n.file-list ul {\n    list-style: none;\n    padding: 0;\n}\n\n.file-list li {\n    background: var(--bg-card);\n    padding: 10px 15px;\n    margin: 8px 0;\n    border-radius: var(--radius-sm);\n    border: 1px solid var(--neutral-200);\n    box-shadow: none;\n}\n\n.file-selector-section {\n    background: var(--bg-card);\n    padding: 20px;\n    border-radius: var(--radius-lg);\n    margin-bottom: 20px;\n    display: flex;\n    align-items: center;\n    gap: 15px;\n    border: 1px solid var(--neutral-200);\n}\n\n.file-selector-section label {\n    color: var(--text-primary);\n    font-weight: 500;\n    white-space: nowrap;\n}\n\n.file-select {\n    flex: 1;\n    padding: 10px 15px;\n    border: 2px solid var(--neutral-300);\n    border-radius: var(--radius-sm);\n    font-size: 1rem;\n    background: var(--bg-card);\n    outline: none;\n    transition: all 0.25s ease;\n}\n\n.file-select:focus {\n    border-color: var(--primary);\n    box-shadow: 0 0 0 3px var(--primary-bg);\n}\n\n.comparison-container {\n    display: grid;\n    grid-template-columns: 1fr;\n    gap: 30px;\n}\n\n.comparison-section {\n    background: var(--neutral-100);\n    border-radius: var(--radius-lg);\n    padding: 25px;\n    border: 1px solid var(--border-light);\n}\n\n.comparison-section h3 {\n    color: var(--text-primary);\n    margin-bottom: 20px;\n    font-size: 1.3rem;\n    font-weight: 500;\n}\n\n.comparison-table {\n    width: 100%;\n    border-collapse: collapse;\n    background: var(--bg-card);\n    border-radius: var(--radius-md);\n    overflow: hidden;\n    box-shadow: var(--shadow-sm);\n}\n\n.comparison-table th,\n.comparison-table td {\n    padding: 12px 15px;\n    text-align: center;\n    border-bottom: 1px solid var(--neutral-200);\n}\n\n.comparison-table th {\n    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);\n    color: var(--text-inverse);\n    font-weight: 500;\n    font-size: 0.9rem;\n}\n\n.comparison-table tr:nth-child(even) {\n    background: var(--neutral-100);\n}\n\n.comparison-table tr:hover {\n    background: var(--primary-bg);\n}\n\n@media (max-width: 768px) {\n    .file-selector-section {\n        flex-direction: column;\n        align-items: stretch;\n        gap: 10px;\n    }\n    \n    .file-select {\n        width: 100%;\n    }\n    \n    .comparison-table {\n        font-size: 0.8rem;\n    }\n    \n    .comparison-table th,\n    .comparison-table td {\n        padding: 8px 6px;\n    }\n}\n\n/* 학생 선택 및 상세 분석 스타일 */\n.student-selector {\n    display: flex;\n    align-items: center;\n    gap: 15px;\n    background: var(--bg-card);\n    padding: 20px;\n    border-radius: var(--radius-lg);\n    margin-bottom: 20px;\n    flex-wrap: wrap;\n    border: 1px solid var(--neutral-200);\n    box-shadow: var(--shadow-sm);\n}\n\n.selector-group {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n}\n\n.selector-group label {\n    font-weight: 500;\n    color: var(--text-primary);\n    white-space: nowrap;\n}\n\n.selector {\n    padding: 10px 12px;\n    border: 1px solid var(--neutral-300);\n    border-radius: var(--radius-sm);\n    font-size: 0.9rem;\n    background: var(--bg-card);\n    min-width: 120px;\n    transition: all 0.25s ease;\n}\n\n.selector:focus {\n    border-color: var(--primary);\n    outline: none;\n    box-shadow: 0 0 0 3px var(--primary-bg);\n}\n\n.detail-btn {\n    background: var(--bg-card);\n    color: var(--text-primary);\n    border: 1px solid var(--neutral-300);\n    padding: 10px 20px;\n    border-radius: var(--radius-sm);\n    font-size: 0.9rem;\n    cursor: pointer;\n    transition: all 0.25s ease;\n    white-space: nowrap;\n}\n\n.detail-btn:hover:not(:disabled) {\n    transform: translateY(-2px);\n    box-shadow: var(--shadow-sm);\n    border-color: var(--primary);\n    color: var(--primary-dark);\n}\n\n.detail-btn:disabled {\n    opacity: 0.5;\n    cursor: not-allowed;\n}\n\n.view-toggle {\n    display: flex;\n    background: var(--neutral-100);\n    border-radius: var(--radius-md);\n    padding: 4px;\n    margin-bottom: 20px;\n    width: fit-content;\n    border: 1px solid var(--neutral-200);\n}\n\n.toggle-btn {\n    background: none;\n    border: none;\n    padding: 10px 20px;\n    border-radius: var(--radius-sm);\n    cursor: pointer;\n    transition: all 0.25s ease;\n    font-weight: 500;\n    color: var(--text-secondary);\n}\n\n.toggle-btn.active {\n    background: var(--bg-card);\n    color: var(--text-primary);\n    box-shadow: var(--shadow-sm);\n}\n\n/* 학생 상세 분석 스타일 */\n.student-detail-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: flex-start;\n    background: linear-gradient(180deg, var(--bg-card) 0%, var(--neutral-100) 100%);\n    color: var(--text-primary);\n    padding: 22px 24px;\n    border-radius: var(--radius-lg);\n    margin-bottom: 20px;\n    border: 1px solid var(--border-light);\n    box-shadow: var(--shadow-md);\n}\n\n.student-info h3 {\n    font-size: 1.5rem;\n    margin-bottom: 6px;\n    font-weight: 400;\n}\n\n.student-meta {\n    display: flex;\n    gap: 14px;\n    font-size: 0.85rem;\n    opacity: 0.9;\n    flex-wrap: wrap;\n}\n\n.overall-stats {\n    display: flex;\n    gap: 12px;\n}\n\n.stat-card {\n    text-align: center;\n    background: var(--bg-card);\n    padding: 12px 16px;\n    border-radius: var(--radius-md);\n    border: 1px solid var(--border-light);\n    box-shadow: var(--shadow-sm);\n    min-width: 110px;\n}\n\n.stat-label {\n    display: block;\n    font-size: 0.8rem;\n    opacity: 0.8;\n    margin-bottom: 5px;\n    text-transform: uppercase;\n    letter-spacing: 1px;\n}\n\n.stat-value {\n    display: block;\n    font-size: 1.35rem;\n    font-weight: 700;\n    color: var(--text-primary);\n}\n\n.stat-value.grade {\n    color: var(--primary);\n}\n\n.student-detail-content {\n    display: flex;\n    flex-direction: column;\n    gap: 22px;\n    margin-bottom: 24px;\n}\n\n.analysis-overview {\n    display: grid;\n    grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.85fr);\n    gap: 20px;\n    margin-bottom: 20px;\n    align-items: start;\n}\n\n.student-summary {\n    display: flex;\n    flex-direction: column;\n    gap: 20px;\n}\n\n.summary-card {\n    background: var(--bg-card);\n    border-radius: var(--radius-lg);\n    padding: 18px 20px;\n    box-shadow: var(--shadow-md);\n    border: 1px solid var(--border-light);\n}\n\n.summary-header {\n    margin-bottom: 14px;\n    padding-bottom: 10px;\n    border-bottom: 1px solid var(--neutral-200);\n}\n\n.summary-header h4 {\n    color: var(--text-primary);\n    font-size: 1.2rem;\n    font-weight: 600;\n    margin: 0;\n}\n\n.summary-grid {\n    display: grid;\n    gap: 10px;\n}\n\n.summary-item {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 8px 0;\n    border-bottom: 1px solid var(--border-light);\n}\n\n.summary-item:last-child {\n    border-bottom: none;\n}\n\n.summary-label {\n    font-weight: 500;\n    color: var(--text-secondary);\n    font-size: 0.9rem;\n    text-transform: uppercase;\n    letter-spacing: 0.5px;\n}\n\n.summary-value {\n    font-weight: 600;\n    color: var(--text-primary);\n    font-size: 1rem;\n    text-align: right;\n}\n\n.summary-value-group {\n    display: flex;\n    flex-direction: column;\n    align-items: flex-end;\n    gap: 4px;\n}\n\n.summary-value.highlight {\n    color: var(--primary);\n    font-size: 1.05rem;\n    font-weight: 600;\n}\n\n.summary-value.orange {\n    color: var(--accent);\n    font-size: 1.05rem;\n    font-weight: 600;\n}\n\n.summary-note {\n    font-size: 0.72rem;\n    color: var(--text-muted);\n    text-align: right;\n    line-height: 1.35;\n    max-width: 210px;\n}\n\n.metric-value.orange {\n    color: var(--accent);\n    font-weight: 600;\n}\n\n.chart-container {\n    background: var(--neutral-100);\n    border-radius: var(--radius-lg);\n    padding: 16px 18px 18px;\n    text-align: center;\n    border: 1px solid var(--border-light);\n    width: 100%;\n    max-width: 420px;\n    justify-self: end;\n}\n\n.chart-container h4 {\n    color: var(--text-primary);\n    margin-bottom: 12px;\n    font-size: 1rem;\n    font-weight: 600;\n}\n\n.chart-container canvas {\n    display: block;\n    width: min(100%, 320px) !important;\n    height: auto !important;\n    margin: 0 auto;\n}\n\n.subject-details h4 {\n    color: var(--text-primary);\n    margin-bottom: 20px;\n    font-size: 1.2rem;\n    font-weight: 500;\n}\n\n.subject-cards {\n    display: grid;\n    grid-template-columns: repeat(2, 1fr);\n    gap: 16px;\n    max-height: none;\n}\n\n@media (max-width: 1200px) {\n    .subject-cards {\n        grid-template-columns: 1fr;\n    }\n}\n\n/* 교과(군)별 섹션 스타일 */\n.subject-group-section {\n    background: var(--neutral-100);\n    border-radius: var(--radius-lg);\n    padding: 20px;\n    border: 1px solid var(--border-light);\n}\n\n.subject-group-header {\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    padding: 12px 16px;\n    background: var(--bg-card);\n    border-radius: var(--radius-md);\n    margin-bottom: 16px;\n    box-shadow: var(--shadow-sm);\n}\n\n.subject-group-header h5 {\n    margin: 0;\n    font-size: 1rem;\n    font-weight: 600;\n    color: var(--text-primary);\n}\n\n.subject-group-header .subject-count {\n    font-size: 0.8rem;\n    color: var(--text-secondary);\n    background: var(--neutral-200);\n    padding: 4px 10px;\n    border-radius: 10px;\n    font-weight: 500;\n}\n\n.subject-group-cards {\n    display: grid;\n    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));\n    gap: 15px;\n}\n\n/* 컴팩트 테이블 스타일 */\n.subject-group-section.compact {\n    padding: 14px;\n    margin-bottom: 0;\n    height: fit-content;\n}\n\n.subject-group-section.compact .subject-group-header {\n    margin-bottom: 12px;\n    padding: 8px 12px;\n}\n\n.subject-group-section.compact .subject-group-header h5 {\n    font-size: 0.95rem;\n}\n\n.subject-table {\n    width: 100%;\n    border-collapse: collapse;\n    background: var(--bg-card);\n    border-radius: var(--radius-md);\n    overflow: hidden;\n    font-size: 0.8rem;\n}\n\n.subject-table thead {\n    background: linear-gradient(135deg, var(--neutral-200) 0%, var(--neutral-100) 100%);\n}\n\n.subject-table th {\n    padding: 8px 6px;\n    text-align: center;\n    font-weight: 600;\n    color: var(--text-primary);\n    font-size: 0.75rem;\n    text-transform: uppercase;\n    letter-spacing: 0.3px;\n    border-bottom: 2px solid var(--neutral-300);\n}\n\n.subject-table th:first-child {\n    text-align: left;\n    padding-left: 10px;\n}\n\n.subject-table td {\n    padding: 8px 6px;\n    border-bottom: 1px solid var(--neutral-200);\n    color: var(--text-primary);\n}\n\n.subject-table td.center {\n    text-align: center;\n}\n\n.subject-table td.subject-name-cell {\n    font-weight: 500;\n    padding-left: 10px;\n    max-width: 100px;\n    white-space: nowrap;\n    overflow: hidden;\n    text-overflow: ellipsis;\n}\n\n.subject-table tbody tr:hover {\n    background: var(--neutral-100);\n}\n\n.subject-table tbody tr:last-child td {\n    border-bottom: none;\n}\n\n.subject-table tr.no-grade-row {\n    opacity: 0.7;\n    background: var(--neutral-50);\n}\n\n.subject-table .score-value {\n    font-weight: 600;\n    color: var(--text-primary);\n}\n\n.subject-table .avg-value {\n    font-size: 0.75rem;\n    color: var(--text-muted);\n    margin-left: 2px;\n}\n\n.subject-table .achievement-badge {\n    display: inline-block;\n    padding: 2px 8px;\n    border-radius: 4px;\n    font-weight: 600;\n    font-size: 0.8rem;\n}\n\n.subject-table .achievement-badge.A { background: var(--success); color: var(--text-inverse); }\n.subject-table .achievement-badge.B { background: var(--info); color: var(--text-inverse); }\n.subject-table .achievement-badge.C { background: var(--accent); color: var(--text-inverse); }\n.subject-table .achievement-badge.D { background: var(--warning); color: var(--text-inverse); }\n.subject-table .achievement-badge.E { background: var(--primary); color: var(--text-inverse); }\n\n.subject-table .grade9-value {\n    color: var(--accent);\n    font-weight: 600;\n}\n\n@media (max-width: 768px) {\n    .subject-table {\n        font-size: 0.75rem;\n    }\n\n    .subject-table th,\n    .subject-table td {\n        padding: 8px 4px;\n    }\n\n    .subject-table td.subject-name-cell {\n        max-width: 80px;\n    }\n\n    .subject-table .avg-value {\n        display: none;\n    }\n}\n\n.subject-card.no-grade {\n    opacity: 0.8;\n    border-left: 4px solid var(--neutral-500);\n}\n\n.subject-metrics.simple {\n    grid-template-columns: 1fr 1fr;\n    margin-bottom: 0;\n}\n\n.no-grade-notice {\n    text-align: center;\n    padding: 15px;\n    background: var(--neutral-200);\n    border-radius: var(--radius-sm);\n    margin-top: 15px;\n}\n\n.no-grade-notice span {\n    color: var(--text-secondary);\n    font-size: 0.9rem;\n    font-style: italic;\n}\n\n.subject-card {\n    background: var(--bg-card);\n    border-radius: var(--radius-md);\n    padding: 18px;\n    box-shadow: var(--shadow-sm);\n    transition: all 0.2s ease;\n    border: 1px solid var(--border-light);\n}\n\n.subject-card:hover {\n    box-shadow: var(--shadow-md);\n    border-color: var(--border-medium);\n}\n\n.subject-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    margin-bottom: 15px;\n    padding-bottom: 10px;\n    border-bottom: 2px solid var(--neutral-200);\n}\n\n.subject-header h5 {\n    color: var(--text-primary);\n    font-size: 1.1rem;\n    font-weight: 600;\n    margin: 0;\n}\n\n.subject-header .credits {\n    background: var(--info);\n    color: var(--text-inverse);\n    padding: 4px 8px;\n    border-radius: 12px;\n    font-size: 0.8rem;\n    font-weight: 500;\n}\n\n.subject-metrics {\n    display: grid;\n    grid-template-columns: repeat(3, 1fr);\n    gap: 15px;\n    margin-bottom: 15px;\n}\n\n.subject-metrics:last-of-type {\n    grid-template-columns: 1fr 1fr 0fr;\n}\n\n.metric {\n    text-align: center;\n}\n\n.metric-label {\n    display: block;\n    font-size: 0.8rem;\n    color: var(--text-secondary);\n    margin-bottom: 5px;\n    text-transform: uppercase;\n    letter-spacing: 0.5px;\n}\n\n.metric-value {\n    display: block;\n    font-size: 1rem;\n    font-weight: 600;\n    color: var(--text-primary);\n}\n\n.metric-average {\n    display: block;\n    font-size: 0.8rem;\n    color: var(--text-secondary);\n    font-weight: normal;\n    margin-top: 2px;\n}\n\n.metric-value.achievement.A {\n    background: var(--success);\n    color: var(--text-inverse);\n    font-weight: bold;\n    padding: 4px 8px;\n    border-radius: 4px;\n}\n.metric-value.achievement.B {\n    background: var(--info);\n    color: var(--text-inverse);\n    font-weight: bold;\n    padding: 4px 8px;\n    border-radius: 4px;\n}\n.metric-value.achievement.C {\n    background: var(--accent);\n    color: var(--text-primary);\n    font-weight: bold;\n    padding: 4px 8px;\n    border-radius: 4px;\n}\n.metric-value.achievement.D {\n    background: var(--warning);\n    color: var(--text-inverse);\n    font-weight: bold;\n    padding: 4px 8px;\n    border-radius: 4px;\n}\n.metric-value.achievement.E, .metric-value.achievement.미도달 {\n    background: var(--primary);\n    color: var(--text-inverse);\n    font-weight: bold;\n    padding: 4px 8px;\n    border-radius: 4px;\n}\n\n.percentile-bar {\n    height: 8px;\n    background: var(--neutral-200);\n    border-radius: 4px;\n    overflow: hidden;\n    position: relative;\n}\n\n.percentile-fill {\n    height: 100%;\n    border-radius: 4px;\n    transition: width 0.8s ease;\n}\n\n.percentile-fill.excellent { background: linear-gradient(90deg, var(--success), var(--success-light)); }\n.percentile-fill.good { background: linear-gradient(90deg, var(--info), var(--info-light)); }\n.percentile-fill.average { background: linear-gradient(90deg, var(--warning), var(--warning-light)); }\n.percentile-fill.low { background: linear-gradient(90deg, var(--neutral-500), var(--neutral-400)); }\n\n.percentile.excellent { color: var(--success); font-weight: 600; }\n.percentile.good { color: var(--info); font-weight: 600; }\n.percentile.average { color: var(--warning); font-weight: 600; }\n.percentile.low { color: var(--neutral-500); font-weight: 500; }\n\n@media (max-width: 1024px) {\n    .analysis-overview {\n        grid-template-columns: 1fr;\n        gap: 20px;\n    }\n    \n    .chart-container {\n        padding: 20px;\n    }\n    \n    .student-detail-header {\n        flex-direction: column;\n        gap: 20px;\n    }\n    \n    .overall-stats {\n        align-self: stretch;\n        justify-content: space-around;\n    }\n    \n    .subject-cards {\n        grid-template-columns: 1fr;\n    }\n}\n\n/* 출력용 스타일 */\n@page {\n    size: A4 portrait;\n    margin: 10mm;\n}\n@media print {\n    .print-area {\n        transform-origin: top left !important;\n    }\n    .print-area.apply-print-scale {\n        transform: scale(var(--page-scale, 1)) !important;\n    }\n    * {\n        -webkit-print-color-adjust: exact !important;\n        color-adjust: exact !important;\n        print-color-adjust: exact !important;\n    }\n    \n    body {\n        background: white !important;\n        margin: 0;\n        padding: 0;\n        font-size: 12px;\n        line-height: 1.4;\n        color: #000 !important;\n    }\n    \n    .container {\n        max-width: none;\n        margin: 0;\n        box-shadow: none;\n        border-radius: 0;\n        background: white;\n    }\n    \n    header {\n        display: none !important;\n    }\n    \n    .upload-section,\n    .tabs,\n    .view-toggle,\n    .student-selector,\n    .search-box,\n    .print-controls {\n        display: none !important;\n    }\n    \n    .results-section {\n        padding: 15px;\n    }\n    \n    .tab-content {\n        display: block !important;\n    }\n    \n    .tab-content:not(.print-target) {\n        display: none !important;\n    }\n\n    /* 학생 탭 인쇄 시 개인 상세 페이지만 표시 */\n    #students-tab.only-class-print > *:not(.class-print-area) {\n        display: none !important;\n    }\n\n    /* A4에 맞춘 폭 고정 및 중앙 정렬 */\n    .class-print-area {\n        width: 190mm;\n        margin: 0 auto;\n    }\n    .class-print-area .student-print-page {\n        width: 190mm;\n        transform-origin: top left !important;\n    }\n    .class-print-area .student-print-page.apply-print-scale {\n        transform: scale(var(--page-scale, 1)) !important;\n    }\n\n    /* 학급 전체 인쇄 모드: 더 컴팩트한 카드와 차트 크기 */\n    #students-tab.only-class-print .student-detail-header {\n        padding: 12px;\n        margin-bottom: 10px;\n    }\n    #students-tab.only-class-print .student-info h3 {\n        font-size: 14px;\n    }\n    #students-tab.only-class-print .student-meta {\n        font-size: 11px;\n    }\n    #students-tab.only-class-print .summary-card,\n    #students-tab.only-class-print .stat-card {\n        margin-bottom: 8px;\n        padding: 10px;\n    }\n    \n    /* 별도 프린트 헤더는 사용하지 않음 */\n    .print-header {\n        display: none !important;\n    }\n    \n    .print-header h2 {\n        margin: 0;\n        color: #2c3e50;\n        font-size: 18px;\n        font-weight: bold;\n    }\n    \n    .print-date {\n        margin-top: 10px;\n        font-size: 12px;\n        color: #666;\n    }\n    \n    .student-detail-header {\n        background: #f8f9fa !important;\n        border: 2px solid #4facfe;\n        margin-bottom: 15px;\n        padding: 20px;\n        page-break-after: avoid;\n    }\n    \n    .student-info h3 {\n        color: #2c3e50 !important;\n        font-size: 16px;\n        margin-bottom: 8px;\n    }\n    \n    .student-meta {\n        color: #666 !important;\n        font-size: 12px;\n    }\n    \n    .stat-card {\n        border: 1px solid #ddd !important;\n        background: white !important;\n    }\n    \n    .stat-label {\n        color: #666 !important;\n        font-size: 10px;\n    }\n    \n    .stat-value {\n        color: #2c3e50 !important;\n        font-size: 14px;\n    }\n    \n    .analysis-overview {\n        grid-template-columns: 1fr;\n        gap: 15px;\n        page-break-inside: avoid;\n    }\n    \n    /* 레이더 차트도 출력/PDF에 포함 */\n    .chart-container {\n        display: block !important;\n    }\n    \n    .summary-card {\n        border: 1px solid #ddd !important;\n        background: #f9f9f9 !important;\n        margin-bottom: 15px;\n    }\n    \n    .summary-header h4 {\n        color: #2c3e50 !important;\n        font-size: 14px;\n    }\n    \n    .summary-label {\n        color: #666 !important;\n        font-size: 11px;\n    }\n    \n    .summary-value {\n        color: #2c3e50 !important;\n        font-size: 12px;\n    }\n    \n    .summary-value.highlight {\n        color: #4facfe !important;\n        font-weight: bold;\n    }\n    \n    .subject-details h4 {\n        color: #2c3e50 !important;\n        font-size: 14px;\n        margin-bottom: 15px;\n    }\n    \n    .subject-cards {\n        grid-template-columns: repeat(2, 1fr);\n        gap: 10px;\n        page-break-inside: avoid;\n    }\n    \n    .subject-card {\n        border: 1px solid #ddd !important;\n        background: white !important;\n        page-break-inside: avoid;\n        margin-bottom: 8px;\n        padding: 12px;\n    }\n    \n    .subject-header h5 {\n        color: #2c3e50 !important;\n        font-size: 12px;\n        margin: 0 0 8px 0;\n    }\n    \n    .subject-header .credits {\n        background: #4facfe !important;\n        color: white !important;\n        font-size: 9px;\n        padding: 2px 6px;\n    }\n    \n    .subject-metrics {\n        gap: 8px;\n        margin-bottom: 8px;\n    }\n    \n    .metric-label {\n        font-size: 9px;\n        color: #666 !important;\n    }\n    \n    .metric-value {\n        font-size: 11px;\n        color: #2c3e50 !important;\n    }\n    \n    .metric-average {\n        font-size: 9px;\n        color: #666 !important;\n    }\n    \n    .percentile-bar {\n        height: 6px;\n        background: #e9ecef !important;\n    }\n    \n    .no-grade-notice {\n        background: rgba(108, 117, 125, 0.1) !important;\n        font-size: 10px;\n    }\n    \n    .no-grade-notice span {\n        color: #666 !important;\n    }\n    \n    /* 성취도 색상 */\n    .achievement.A, .metric-value.achievement.A { \n        background: #28a745 !important; \n        color: white !important; \n    }\n    .achievement.B, .metric-value.achievement.B { \n        background: #17a2b8 !important; \n        color: white !important; \n    }\n    .achievement.C, .metric-value.achievement.C { \n        background: #ffc107 !important; \n        color: #212529 !important; \n    }\n    .achievement.D, .metric-value.achievement.D { \n        background: #fd7e14 !important; \n        color: white !important; \n    }\n    .achievement.E, .achievement.미도달, \n    .metric-value.achievement.E, .metric-value.achievement.미도달 { \n        background: #dc3545 !important; \n        color: white !important; \n    }\n    \n    /* 페이지 나누기 규칙 */\n    .subject-card {\n        break-inside: avoid;\n    }\n    \n    .summary-card {\n        break-inside: avoid;\n    }\n\n    /* 학급 전체 인쇄: 학생별 한 페이지씩 */\n    .class-print-area .student-print-page {\n        page-break-after: always;\n        break-after: page;\n    }\n    .class-print-area .student-print-page:last-child {\n        page-break-after: auto;\n        break-after: auto;\n    }\n}\n\n/* PDF 출력 버튼 스타일 */\n.print-controls {\n    display: flex;\n    gap: 10px;\n    margin-bottom: 20px;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n}\n\n.student-nav-controls {\n    display: flex;\n    align-items: center;\n    gap: 10px;\n    flex-wrap: wrap;\n}\n\n.student-nav-status {\n    color: var(--text-secondary);\n    font-size: 0.9rem;\n    font-weight: 600;\n    padding: 0 4px;\n}\n\n.print-btn, .pdf-btn {\n    background: linear-gradient(135deg, var(--success) 0%, var(--success-light) 100%);\n    color: var(--text-inverse);\n    border: none;\n    padding: 10px 20px;\n    border-radius: var(--radius-sm);\n    font-size: 0.9rem;\n    cursor: pointer;\n    transition: all 0.25s ease;\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    font-weight: 500;\n}\n\n.pdf-btn {\n    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);\n}\n\n.print-btn:hover, .pdf-btn:hover {\n    transform: translateY(-2px);\n    box-shadow: var(--shadow-md);\n}\n\n.print-btn::before {\n    content: \"🖨️\";\n    font-size: 16px;\n}\n\n.pdf-btn::before {\n    content: \"📄\";\n    font-size: 16px;\n}\n\n@media (max-width: 768px) {\n    .student-selector {\n        flex-direction: column;\n        align-items: stretch;\n        gap: 15px;\n    }\n\n    .selector-group {\n        justify-content: space-between;\n    }\n\n    .selector {\n        min-width: unset;\n        flex: 1;\n    }\n\n    .subject-metrics {\n        grid-template-columns: repeat(2, 1fr);\n        gap: 10px;\n    }\n\n    .container {\n        margin: 10px;\n        border-radius: var(--radius-lg);\n    }\n\n    header {\n        padding: 20px;\n    }\n\n    header h1 {\n        font-size: 1.6rem;\n    }\n\n    .header-subtitle {\n        font-size: 0.92rem;\n    }\n\n    .upload-section,\n    .results-section {\n        padding: 20px;\n    }\n\n    .file-input-label {\n        min-height: 74px;\n        padding: 16px 18px;\n    }\n\n    .action-buttons {\n        flex-direction: column;\n        align-items: stretch;\n    }\n\n    .subject-averages {\n        grid-template-columns: 1fr;\n    }\n\n    .tabs {\n        display: grid;\n        grid-template-columns: repeat(3, minmax(0, 1fr));\n        width: 100%;\n    }\n\n    .tab-btn {\n        min-width: 0;\n        padding: 12px 10px;\n    }\n\n    .tab-btn.active {\n        border-left: none;\n    }\n\n    .students-grid {\n        grid-template-columns: 1fr;\n        gap: 15px;\n    }\n\n    .student-card-header {\n        flex-direction: column;\n        gap: 15px;\n        align-items: stretch;\n    }\n\n    .student-summary {\n        justify-content: space-around;\n    }\n\n    .subject-data {\n        gap: 6px;\n    }\n\n    .subject-name {\n        font-size: 0.85rem;\n    }\n\n    .subject-score, .subject-achievement, .subject-grade, .subject-percentile {\n        font-size: 0.75rem;\n    }\n\n    .print-controls {\n        justify-content: center;\n    }\n\n    .print-btn, .pdf-btn {\n        flex: 1;\n        min-width: 120px;\n        justify-content: center;\n    }\n\n    .analyze-btn,\n    .secondary-btn {\n        width: 100%;\n        justify-content: center;\n    }\n\n    .print-controls,\n    .student-nav-controls {\n        justify-content: center;\n    }\n}\n";
     }
 
     // JavaScript 파일 내용 가져오기 (실제 동작하는 버전)
@@ -4746,6 +4613,9 @@ class StandaloneScoreAnalyzer {
         this.displaySubjectAverages();
         this.displayGradeAnalysis();
         this.displayStudentAnalysis();
+        if (document.querySelector('[data-tab="grade-analysis"]') && document.getElementById('grade-analysis-tab')) {
+            this.switchTab('grade-analysis');
+        }
     }
 
     displaySubjectAverages() {

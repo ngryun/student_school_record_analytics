@@ -139,6 +139,15 @@ header h1 {
     background: linear-gradient(180deg, var(--neutral-50) 0%, var(--bg-card) 100%);
 }
 
+.container.post-analysis > header,
+.container.post-analysis .upload-guide,
+.container.post-analysis .section-divider,
+.container.post-analysis .file-input-wrapper,
+.container.post-analysis #fileList,
+.container.post-analysis #analyzeBtn {
+    display: none !important;
+}
+
 .file-input-wrapper {
     margin-bottom: 30px;
 }
