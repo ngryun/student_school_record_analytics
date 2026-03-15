@@ -6,6 +6,8 @@ class ScoreAnalyzer {
         this.subjectGroups = null; // 교과(군) 매핑 데이터
         this.subjectGroupsReady = this.loadSubjectGroups(); // 교과(군) 데이터 로드
         this.handleStudentDetailKeydown = this.handleStudentDetailKeydown.bind(this);
+        this._sortColumn = null; // 학생 테이블 정렬 기준
+        this._sortAsc = true; // 정렬 방향
         this.initializeEventListeners();
 
         // If the page provides preloaded analysis data, render directly
@@ -48,8 +50,7 @@ class ScoreAnalyzer {
             selectedGrade: document.getElementById('gradeSelect')?.value || '',
             selectedClass: document.getElementById('classSelect')?.value || '',
             selectedStudent: document.getElementById('studentSelect')?.value || '',
-            studentNameSearch: document.getElementById('studentNameSearch')?.value || '',
-            studentSearch: document.getElementById('studentSearch')?.value || ''
+            studentNameSearch: document.getElementById('studentNameSearch')?.value || ''
         };
     }
 
@@ -61,7 +62,6 @@ class ScoreAnalyzer {
         const classSelect = document.getElementById('classSelect');
         const studentSelect = document.getElementById('studentSelect');
         const studentNameSearch = document.getElementById('studentNameSearch');
-        const studentSearch = document.getElementById('studentSearch');
         const showStudentDetail = document.getElementById('showStudentDetail');
 
         if (gradeSelect) gradeSelect.value = state.selectedGrade || '';
@@ -73,9 +73,6 @@ class ScoreAnalyzer {
 
         if (studentSelect && state.selectedStudent) {
             studentSelect.value = String(state.selectedStudent);
-        }
-        if (studentSearch) {
-            studentSearch.value = state.studentSearch || '';
         }
         if (showStudentDetail && studentSelect) {
             showStudentDetail.disabled = !studentSelect.value;
@@ -230,7 +227,6 @@ class ScoreAnalyzer {
         const exportCsvBtn = document.getElementById('exportCsvBtn');
         const exportHtmlBtn = document.getElementById('exportHtmlBtn');
         const tabBtns = document.querySelectorAll('.tab-btn');
-        const studentSearch = document.getElementById('studentSearch');
         const gradeSelect = document.getElementById('gradeSelect');
         const classSelect = document.getElementById('classSelect');
         const studentSelect = document.getElementById('studentSelect');
@@ -317,12 +313,6 @@ class ScoreAnalyzer {
             });
         }
 
-        if (studentSearch) {
-            studentSearch.addEventListener('input', () => {
-                this.filterStudentTable();
-            });
-        }
-
         gradeSelect.addEventListener('change', () => {
             this.updateClassOptions();
             this.updateStudentOptions();
@@ -336,10 +326,15 @@ class ScoreAnalyzer {
 
         studentSelect.addEventListener('change', () => {
             showStudentDetail.disabled = !studentSelect.value;
+            // Auto-show student detail on select
+            if (studentSelect.value) {
+                this.showStudentDetail();
+            }
         });
         if (studentNameSearch) {
             studentNameSearch.addEventListener('input', () => {
                 this.updateStudentOptions();
+                this.filterStudentTable();
             });
         }
 
@@ -357,6 +352,44 @@ class ScoreAnalyzer {
 
         if (pdfClassBtn) {
             pdfClassBtn.addEventListener('click', () => this.generateSelectedClassPDF());
+        }
+
+        // In-app help button
+        const helpBtn = document.getElementById('inAppHelpBtn');
+        if (helpBtn) {
+            helpBtn.addEventListener('click', () => this.showHelpModal());
+        }
+
+        // Restore tab from URL hash
+        window.addEventListener('hashchange', () => {
+            const hash = location.hash.replace('#', '');
+            if (hash && document.querySelector(`[data-tab="${hash}"]`)) {
+                this.switchTab(hash);
+            }
+        });
+
+        // Mobile filter toggle
+        this._setupMobileFilterToggle();
+    }
+
+    _setupMobileFilterToggle() {
+        const selector = document.querySelector('.student-selector');
+        if (!selector) return;
+
+        // Add toggle button if not present
+        if (!selector.querySelector('.filter-toggle-btn')) {
+            const toggleBtn = document.createElement('button');
+            toggleBtn.className = 'detail-btn filter-toggle-btn';
+            toggleBtn.innerHTML = '\u25BC \uD544\uD130 \uD3BC\uCE58\uAE30';
+            toggleBtn.addEventListener('click', () => {
+                const collapsed = selector.classList.toggle('collapsed');
+                toggleBtn.innerHTML = collapsed ? '\u25BC \uD544\uD130 \uD3BC\uCE58\uAE30' : '\u25B2 \uD544\uD130 \uC811\uAE30';
+            });
+            selector.insertBefore(toggleBtn, selector.firstChild);
+            // Start collapsed on mobile
+            if (window.innerWidth <= 768) {
+                selector.classList.add('collapsed');
+            }
         }
     }
 
@@ -400,14 +433,31 @@ class ScoreAnalyzer {
     displayFileList(files) {
         const fileList = document.getElementById('fileList');
         fileList.innerHTML = '<h4>선택된 파일:</h4>';
-        
+
         const ul = document.createElement('ul');
-        files.forEach(file => {
+        files.forEach((file, index) => {
             const li = document.createElement('li');
-            li.textContent = file.name;
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = file.name;
+            li.appendChild(nameSpan);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'file-remove-btn';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.title = '파일 제거';
+            removeBtn.addEventListener('click', () => {
+                this.selectedFiles = this.selectedFiles.filter((_, i) => i !== index);
+                if (this.selectedFiles.length === 0) {
+                    fileList.style.display = 'none';
+                    document.getElementById('analyzeBtn').disabled = true;
+                } else {
+                    this.displayFileList(this.selectedFiles);
+                }
+            });
+            li.appendChild(removeBtn);
             ul.appendChild(li);
         });
-        
+
         fileList.appendChild(ul);
         fileList.style.display = 'block';
     }
@@ -417,24 +467,27 @@ class ScoreAnalyzer {
         const files = (this.selectedFiles && this.selectedFiles.length > 0)
             ? this.selectedFiles
             : Array.from(fileInput.files);
-        
+
         if (files.length === 0) {
             this.showError('파일을 선택해주세요.');
             return;
         }
 
         this.showLoading();
-        
+
         try {
             await this.subjectGroupsReady;
             this.filesData.clear();
-            
-            for (const file of files) {
-                const data = await this.readExcelFile(file);
-                const fileData = this.parseFileData(data, file.name);
-                this.filesData.set(file.name, fileData);
+
+            const totalFiles = files.length;
+            for (let i = 0; i < files.length; i++) {
+                this.updateLoadingProgress(i, totalFiles, files[i].name);
+                const data = await this.readExcelFile(files[i]);
+                const fileData = this.parseFileData(data, files[i].name);
+                this.filesData.set(files[i].name, fileData);
             }
-            
+            this.updateLoadingProgress(totalFiles, totalFiles, '통합 분석 중...');
+
             this.combineAllData();
             this.displayResults();
             this.setIntroSectionVisible(false);
@@ -445,11 +498,49 @@ class ScoreAnalyzer {
             const exportHtmlBtn = document.getElementById('exportHtmlBtn');
             if (exportCsvBtn) exportCsvBtn.disabled = false;
             if (exportHtmlBtn) exportHtmlBtn.disabled = false;
-            
+
+            // Show analysis summary banner
+            this.showAnalysisSummary();
+
+            // Auto-scroll to results
+            const results = document.getElementById('results');
+            if (results) {
+                results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+
         } catch (error) {
             this.hideLoading();
             this.showError('파일 분석 중 오류가 발생했습니다: ' + error.message);
         }
+    }
+
+    updateLoadingProgress(current, total, label) {
+        const bar = document.getElementById('loadingProgressBar');
+        const text = document.getElementById('loadingProgressText');
+        const loadingText = document.getElementById('loadingText');
+        const pct = Math.round((current / Math.max(1, total)) * 100);
+        if (bar) bar.style.width = pct + '%';
+        if (text) text.textContent = `${current}/${total} 파일 처리됨`;
+        if (loadingText && label) loadingText.textContent = label;
+    }
+
+    showAnalysisSummary() {
+        const banner = document.getElementById('analysisSummaryBanner');
+        if (!banner || !this.combinedData) return;
+
+        const studentCount = this.combinedData.students.length;
+        const subjectCount = this.combinedData.subjects.length;
+        const fileCount = this.combinedData.fileNames ? this.combinedData.fileNames.length : 0;
+
+        banner.innerHTML = `
+            <div class="analysis-summary-banner">
+                <span class="summary-icon">\u2705</span>
+                <div>
+                    <div class="summary-text">분석 완료</div>
+                    <div class="summary-detail">${fileCount}개 파일 \u00B7 ${studentCount}명 학생 \u00B7 ${subjectCount}개 과목</div>
+                </div>
+            </div>
+        `;
     }
 
     combineAllData() {
@@ -1531,8 +1622,12 @@ class ScoreAnalyzer {
         this.displaySubjectAverages();
         this.displayGradeAnalysis();
         this.displayStudentAnalysis();
-        if (document.querySelector('[data-tab="grade-analysis"]') && document.getElementById('grade-analysis-tab')) {
-            this.switchTab('grade-analysis');
+
+        // Restore tab from URL hash, or default to grade-analysis
+        const hash = location.hash.replace('#', '');
+        const targetTab = (hash && document.querySelector(`[data-tab="${hash}"]`)) ? hash : 'grade-analysis';
+        if (document.querySelector(`[data-tab="${targetTab}"]`) && document.getElementById(`${targetTab}-tab`)) {
+            this.switchTab(targetTab);
         }
     }
 
@@ -1700,7 +1795,7 @@ class ScoreAnalyzer {
                 this.downloadFile(readme, "README.txt", "text/plain");
             }, 1500);
             
-            alert(`배포용 파일들을 다운로드하고 있습니다.\\n\\n모든 파일을 같은 폴더에 저장한 후\\nindex.html 파일을 열어서 사용하세요.`);
+            this.showToast('모든 파일을 같은 폴더에 저장한 후 index.html을 열어서 사용하세요.', 'info', '배포용 파일 다운로드', 8000);
         }
     }
 
@@ -2264,10 +2359,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!this.combinedData) return;
 
+        // Build subject filter bar
+        const groups = new Set();
+        this.combinedData.subjects.forEach(s => groups.add(this.getSubjectGroup(s.name)));
+        let filterBar = document.getElementById('subjectFilterBar');
+        if (!filterBar) {
+            filterBar = document.createElement('div');
+            filterBar.id = 'subjectFilterBar';
+            filterBar.className = 'subject-filter-bar';
+            container.parentElement.insertBefore(filterBar, container);
+        }
+        filterBar.innerHTML = '';
+        const allBtn = document.createElement('button');
+        allBtn.className = 'subject-filter-btn active';
+        allBtn.textContent = '전체';
+        allBtn.addEventListener('click', () => {
+            filterBar.querySelectorAll('.subject-filter-btn').forEach(b => b.classList.remove('active'));
+            allBtn.classList.add('active');
+            container.querySelectorAll('.subject-item').forEach(el => el.style.display = '');
+        });
+        filterBar.appendChild(allBtn);
+        groups.forEach(group => {
+            const btn = document.createElement('button');
+            btn.className = 'subject-filter-btn';
+            btn.textContent = group;
+            btn.addEventListener('click', () => {
+                filterBar.querySelectorAll('.subject-filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                container.querySelectorAll('.subject-item').forEach(el => {
+                    el.style.display = el.dataset.group === group ? '' : 'none';
+                });
+            });
+            filterBar.appendChild(btn);
+        });
+
         this.combinedData.subjects.forEach(subject => {
             const subjectDiv = document.createElement('div');
             subjectDiv.className = 'subject-item';
-            
+            subjectDiv.dataset.group = this.getSubjectGroup(subject.name);
+
             // 성취도 분포 HTML 생성
             let distributionHTML = '';
             if (subject.distribution) {
@@ -2285,7 +2415,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 distributionHTML += '</div>';
             }
-            
+
             subjectDiv.innerHTML = `
                 <div class="subject-header">
                     <h3>${subject.name}</h3>
@@ -2948,17 +3078,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const gradeSelect = document.getElementById('gradeSelect');
         const classSelect = document.getElementById('classSelect');
         const studentNameSearch = document.getElementById('studentNameSearch');
-        const studentSearch = document.getElementById('studentSearch');
 
         const selectedGrade = gradeSelect ? gradeSelect.value : '';
         const selectedClass = classSelect ? classSelect.value : '';
         const detailQuery = studentNameSearch && studentNameSearch.value
             ? studentNameSearch.value.trim().toLowerCase()
             : '';
-        const tableQuery = studentSearch && studentSearch.value
-            ? studentSearch.value.trim().toLowerCase()
-            : '';
-
         let students = this.combinedData.students;
         if (selectedGrade) {
             students = students.filter(s => String(s.grade) === String(selectedGrade));
@@ -2970,13 +3095,6 @@ document.addEventListener('DOMContentLoaded', () => {
             students = students.filter(s =>
                 (s.name && s.name.toLowerCase().includes(detailQuery)) ||
                 (s.originalNumber && String(s.originalNumber).includes(detailQuery))
-            );
-        }
-        if (tableQuery) {
-            students = students.filter(s =>
-                (s.name && s.name.toLowerCase().includes(tableQuery)) ||
-                String(s.number).includes(tableQuery) ||
-                (s.originalNumber && String(s.originalNumber).includes(tableQuery))
             );
         }
 
@@ -3009,6 +3127,30 @@ document.addEventListener('DOMContentLoaded', () => {
             container.innerHTML = '<p>학생 데이터가 없습니다.</p>';
             return;
         }
+
+        // Sort controls
+        const sortBar = document.createElement('div');
+        sortBar.className = 'subject-filter-bar';
+        sortBar.style.marginBottom = '14px';
+        const sortLabel = document.createElement('span');
+        sortLabel.textContent = '정렬:';
+        sortLabel.style.cssText = 'font-size:0.85rem;font-weight:600;color:var(--text-secondary);padding:7px 0;';
+        sortBar.appendChild(sortLabel);
+        const sortOptions = [
+            { key: 'number', label: '번호순' },
+            { key: 'name', label: '이름순' },
+            { key: 'avgGrade', label: '평균등급순' },
+            { key: 'rank', label: '순위순' }
+        ];
+        sortOptions.forEach(opt => {
+            const btn = document.createElement('button');
+            btn.className = 'subject-filter-btn' + (this._sortColumn === opt.key ? ' active' : '');
+            const arrow = this._sortColumn === opt.key ? (this._sortAsc ? ' \u25B2' : ' \u25BC') : '';
+            btn.textContent = opt.label + arrow;
+            btn.addEventListener('click', () => this._toggleSort(opt.key));
+            sortBar.appendChild(btn);
+        });
+        container.appendChild(sortBar);
 
         // 학생 카드 방식으로 변경
         const studentsGrid = document.createElement('div');
@@ -3123,11 +3265,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const gradeSelect = document.getElementById('gradeSelect');
         const classSelect = document.getElementById('classSelect');
-        const studentSearch = document.getElementById('studentSearch');
+        const studentNameSearch = document.getElementById('studentNameSearch');
 
         const selectedGrade = gradeSelect ? gradeSelect.value : '';
         const selectedClass = classSelect ? classSelect.value : '';
-        const searchTerm = studentSearch ? studentSearch.value.trim().toLowerCase() : '';
+        const searchTerm = studentNameSearch ? studentNameSearch.value.trim().toLowerCase() : '';
 
         // 학년/반/검색어로 필터링
         let filtered = this.combinedData.students;
@@ -3143,8 +3285,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (searchTerm) {
             filtered = filtered.filter(s =>
                 s.number.toString().includes(searchTerm) ||
-                s.name.toLowerCase().includes(searchTerm)
+                s.name.toLowerCase().includes(searchTerm) ||
+                (s.originalNumber && String(s.originalNumber).includes(searchTerm))
             );
+        }
+
+        // Apply sort
+        if (this._sortColumn) {
+            filtered = this._sortStudents(filtered);
         }
 
         // 테이블 다시 렌더링
@@ -3154,18 +3302,55 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    switchTab(tabName) {
-        // 탭 버튼 활성화
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.classList.remove('active');
+    _sortStudents(students) {
+        const col = this._sortColumn;
+        const asc = this._sortAsc;
+        return [...students].sort((a, b) => {
+            let va, vb;
+            if (col === 'name') {
+                va = a.name || ''; vb = b.name || '';
+                return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+            } else if (col === 'number') {
+                va = a.originalNumber || 0; vb = b.originalNumber || 0;
+            } else if (col === 'avgGrade') {
+                va = a.weightedAverageGrade || 999; vb = b.weightedAverageGrade || 999;
+            } else if (col === 'rank') {
+                va = a.averageGradeRank || 999; vb = b.averageGradeRank || 999;
+            } else {
+                return 0;
+            }
+            return asc ? va - vb : vb - va;
         });
-        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+    }
+
+    _toggleSort(column) {
+        if (this._sortColumn === column) {
+            this._sortAsc = !this._sortAsc;
+        } else {
+            this._sortColumn = column;
+            this._sortAsc = true;
+        }
+        this.filterStudentTable();
+    }
+
+    switchTab(tabName) {
+        // 탭 버튼 활성화 + ARIA
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            const isActive = btn.dataset.tab === tabName;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
 
         // 탭 내용 표시
         document.querySelectorAll('.tab-content').forEach(content => {
             content.classList.remove('active');
         });
         document.getElementById(`${tabName}-tab`).classList.add('active');
+
+        // URL hash 업데이트
+        if (history.replaceState) {
+            history.replaceState(null, '', '#' + tabName);
+        }
     }
 
     switchView(viewType) {
@@ -3575,12 +3760,12 @@ document.addEventListener('DOMContentLoaded', () => {
         let students = [];
         try {
             if (!grade || !cls) {
-                alert('학년과 반을 선택해 주세요.');
+                this.showToast('학년과 반을 선택해 주세요.', 'warning');
                 return;
             }
             students = this.combinedData.students.filter(s => String(s.grade) === String(grade) && String(s.class) === String(cls));
             if (students.length === 0) {
-                alert('선택한 학급의 학생이 없습니다.');
+                this.showToast('선택한 학급의 학생이 없습니다.', 'warning');
                 return;
             }
 
@@ -3694,13 +3879,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         const partName = `${grade}학년_${cls}반_학생성적_${new Date().toISOString().split('T')[0]}_part${part + 1}-of-${totalParts}.pdf`;
                         partPdf.save(partName);
                     }
-                    alert('PDF가 용량 문제로 여러 개의 파일로 분할 저장되었습니다.');
+                    this.showToast('PDF가 용량 문제로 여러 개의 파일로 분할 저장되었습니다.', 'warning', 'PDF 분할 저장', 6000);
                     return;
                 } catch (fallbackErr) {
                     console.error('분할 저장 시도 중 오류:', fallbackErr);
                 }
             }
-            alert('학급 전체 PDF 생성 중 오류가 발생했습니다: ' + (err && err.message ? err.message : String(err)));
+            this.showToast('학급 전체 PDF 생성 중 오류가 발생했습니다: ' + (err && err.message ? err.message : String(err)), 'error', 'PDF 오류', 6000);
         } finally {
             // UI 복구
             this.hidePdfOverlay();
@@ -4051,7 +4236,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // PDF에 포함할 요소 선택 (차트 제외)
             const element = document.getElementById('printArea');
             if (!element) {
-                alert('PDF 생성할 내용을 찾을 수 없습니다.');
+                this.showToast('PDF 생성할 내용을 찾을 수 없습니다.', 'error');
                 return;
             }
 
@@ -4092,7 +4277,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch (error) {
             console.error('PDF 생성 중 오류:', error);
-            alert('PDF 생성 중 오류가 발생했습니다: ' + error.message);
+            this.showToast('PDF 생성 중 오류가 발생했습니다: ' + error.message, 'error', 'PDF 오류');
         }
     }
 
@@ -4100,6 +4285,13 @@ document.addEventListener('DOMContentLoaded', () => {
     showLoading() {
         document.getElementById('loading').style.display = 'block';
         document.getElementById('results').style.display = 'none';
+        // Reset progress bar
+        const bar = document.getElementById('loadingProgressBar');
+        const text = document.getElementById('loadingProgressText');
+        const loadingText = document.getElementById('loadingText');
+        if (bar) bar.style.width = '0%';
+        if (text) text.textContent = '';
+        if (loadingText) loadingText.textContent = '분석 중...';
         this.hideError();
     }
 
@@ -4109,12 +4301,96 @@ document.addEventListener('DOMContentLoaded', () => {
 
     showError(message) {
         const errorDiv = document.getElementById('error');
-        errorDiv.textContent = message;
-        errorDiv.style.display = 'block';
+        errorDiv.innerHTML = `<span>${message}</span><button class="error-close-btn" onclick="this.parentElement.style.display='none'">&times;</button>`;
+        errorDiv.style.display = 'flex';
+        // Auto-dismiss after 8 seconds
+        clearTimeout(this._errorTimer);
+        this._errorTimer = setTimeout(() => { errorDiv.style.display = 'none'; }, 8000);
     }
 
     hideError() {
-        document.getElementById('error').style.display = 'none';
+        const errorDiv = document.getElementById('error');
+        errorDiv.style.display = 'none';
+        clearTimeout(this._errorTimer);
+    }
+
+    // ========== Toast Notification System ==========
+    showToast(message, type = 'info', title = '', duration = 4000) {
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+
+        const icons = { success: '\u2705', error: '\u274C', warning: '\u26A0\uFE0F', info: '\u2139\uFE0F' };
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.innerHTML = `
+            <span class="toast-icon">${icons[type] || icons.info}</span>
+            <div class="toast-body">
+                ${title ? `<div class="toast-title">${title}</div>` : ''}
+                <div class="toast-message">${message}</div>
+            </div>
+            <button class="toast-close" aria-label="닫기">&times;</button>
+        `;
+
+        toast.querySelector('.toast-close').addEventListener('click', () => {
+            toast.classList.add('removing');
+            setTimeout(() => toast.remove(), 300);
+        });
+
+        container.appendChild(toast);
+
+        if (duration > 0) {
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.classList.add('removing');
+                    setTimeout(() => toast.remove(), 300);
+                }
+            }, duration);
+        }
+    }
+
+    // ========== In-App Help Modal ==========
+    showHelpModal() {
+        const existing = document.getElementById('helpModalOverlay');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'helpModalOverlay';
+        overlay.className = 'help-modal-overlay';
+        overlay.innerHTML = `
+            <div class="help-modal">
+                <h3>사용 안내</h3>
+                <div class="help-section">
+                    <h4>1. 파일 업로드</h4>
+                    <p>NEIS에서 <strong>XLS data</strong> 양식으로 다운로드한 파일을 업로드합니다. 여러 파일을 동시에 선택하거나 드래그하여 업로드할 수 있습니다.</p>
+                </div>
+                <div class="help-section">
+                    <h4>2. 분석 결과 확인</h4>
+                    <ol>
+                        <li><strong>과목별 분석</strong>: 과목별 평균 점수와 등급 분포를 확인합니다.</li>
+                        <li><strong>평균등급 분포</strong>: 전체 학생의 평균등급 분포를 차트로 확인합니다.</li>
+                        <li><strong>학생별 분석</strong>: 개별 학생의 상세 성적을 확인하고 PDF로 저장합니다.</li>
+                    </ol>
+                </div>
+                <div class="help-section">
+                    <h4>3. 내보내기</h4>
+                    <p><strong>취합용 DB 파일</strong>: 전체 학생 데이터를 CSV 파일로 저장합니다.<br>
+                    <strong>분석결과 HTML</strong>: 현재 분석 결과를 독립형 HTML 파일로 저장합니다.<br>
+                    <strong>PDF 저장</strong>: 개별 학생 또는 학급 전체 보고서를 PDF로 저장합니다.</p>
+                </div>
+                <div class="help-section">
+                    <h4>보안</h4>
+                    <p>모든 데이터는 브라우저에서만 처리되며, 서버로 전송되지 않습니다.</p>
+                </div>
+                <p style="font-size:0.82rem;color:var(--text-muted);margin-top:12px;">
+                    자세한 도움말: <a href="https://namgungyeon.tistory.com/133" target="_blank" rel="noopener" style="color:var(--primary);">온라인 가이드</a>
+                </p>
+                <button class="help-close-btn">닫기</button>
+            </div>
+        `;
+
+        overlay.querySelector('.help-close-btn').addEventListener('click', () => overlay.remove());
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+        document.body.appendChild(overlay);
     }
 
     exportToCSV() {
