@@ -3424,7 +3424,7 @@ document.addEventListener('DOMContentLoaded', () => {
             : '';
         const usesBusanReference = this.usesBusanNineGradeReference(student, this.combinedData.subjects);
         const nineGradeReferenceNote = usesBusanReference
-            ? '<span class="summary-note">부산교육청 발표자료를 환산 기준으로 사용했습니다.</span>'
+            ? '<span class="summary-note">환산기준 : 부산시교육청 자료</span>'
             : '';
         
         const html = `
@@ -3543,7 +3543,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const totalGradedStudents = student.totalGradedStudents;
         const usesBusanReference = this.usesBusanNineGradeReference(student, this.combinedData.subjects);
         const nineGradeReferenceNote = usesBusanReference
-            ? '<span class="summary-note">부산교육청 발표자료를 환산 기준으로 사용했습니다.</span>'
+            ? '<span class="summary-note">환산기준 : 부산시교육청 자료</span>'
             : '';
         return `
             <div class="student-print-page">
