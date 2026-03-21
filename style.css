@@ -1466,6 +1466,37 @@ header h1 {
     gap: 4px;
 }
 
+.summary-reference-list {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.summary-reference-item {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.summary-reference-label {
+    min-width: 38px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--neutral-200);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-align: center;
+}
+
+.summary-reference-value {
+    color: var(--accent);
+    font-size: 1.02rem;
+    font-weight: 600;
+}
+
 .summary-value.highlight {
     color: var(--primary);
     font-size: 1.05rem;

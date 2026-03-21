@@ -1485,6 +1485,60 @@ class ScoreAnalyzer {
         ];
     }
 
+    getGyeonggiGradeAverageToNineGradeTable() {
+        return [
+            { grade5: 1.00, grade9: 1.39 },
+            { grade5: 1.083, grade9: 1.53 },
+            { grade5: 1.167, grade9: 1.73 },
+            { grade5: 1.250, grade9: 1.87 },
+            { grade5: 1.333, grade9: 2.03 },
+            { grade5: 1.417, grade9: 2.18 },
+            { grade5: 1.500, grade9: 2.31 },
+            { grade5: 1.583, grade9: 2.45 },
+            { grade5: 1.667, grade9: 2.61 },
+            { grade5: 1.750, grade9: 2.73 },
+            { grade5: 1.833, grade9: 2.88 },
+            { grade5: 1.917, grade9: 3.00 },
+            { grade5: 2.000, grade9: 3.16 },
+            { grade5: 2.083, grade9: 3.28 },
+            { grade5: 2.167, grade9: 3.41 },
+            { grade5: 2.250, grade9: 3.54 },
+            { grade5: 2.333, grade9: 3.68 },
+            { grade5: 2.417, grade9: 3.80 },
+            { grade5: 2.500, grade9: 3.95 },
+            { grade5: 2.583, grade9: 4.08 },
+            { grade5: 2.667, grade9: 4.21 },
+            { grade5: 2.750, grade9: 4.34 },
+            { grade5: 2.833, grade9: 4.48 },
+            { grade5: 2.917, grade9: 4.61 },
+            { grade5: 3.000, grade9: 4.75 },
+            { grade5: 3.083, grade9: 4.87 },
+            { grade5: 3.167, grade9: 5.00 },
+            { grade5: 3.250, grade9: 5.12 },
+            { grade5: 3.333, grade9: 5.24 },
+            { grade5: 3.417, grade9: 5.33 },
+            { grade5: 3.500, grade9: 5.47 },
+            { grade5: 3.583, grade9: 5.59 },
+            { grade5: 3.667, grade9: 5.71 },
+            { grade5: 3.750, grade9: 5.83 },
+            { grade5: 3.833, grade9: 5.98 },
+            { grade5: 3.917, grade9: 6.09 },
+            { grade5: 4.000, grade9: 6.25 },
+            { grade5: 4.083, grade9: 6.36 },
+            { grade5: 4.167, grade9: 6.50 },
+            { grade5: 4.250, grade9: 6.61 },
+            { grade5: 4.333, grade9: 6.72 },
+            { grade5: 4.417, grade9: 6.81 },
+            { grade5: 4.500, grade9: 6.94 },
+            { grade5: 4.583, grade9: 7.05 },
+            { grade5: 4.667, grade9: 7.18 },
+            { grade5: 4.750, grade9: 7.30 },
+            { grade5: 4.833, grade9: 7.45 },
+            { grade5: 4.917, grade9: 7.62 },
+            { grade5: 5.000, grade9: 8.97 }
+        ];
+    }
+
     getBusanTopNineGradeRange() {
         return {
             grade5: 1.00,
@@ -1507,22 +1561,26 @@ class ScoreAnalyzer {
         return Number(gradeAverage.toFixed(2)) <= this.getBusanTopNineGradeRange().grade5;
     }
 
-    estimateNineGradeAverageFromFiveGradeAverage(gradeAverage) {
+    estimateNineGradeAverageFromReferenceTable(gradeAverage, table, options = {}) {
         if (gradeAverage === null || gradeAverage === undefined || isNaN(gradeAverage)) {
             return null;
         }
 
-        const topRange = this.getBusanTopNineGradeRange();
-        const table = this.getBusanGradeAverageToNineGradeTable();
         if (table.length === 0) return null;
 
-        if (gradeAverage <= topRange.grade5) {
-            return topRange.maxGrade9;
-        }
+        const topRange = options.topRange || null;
 
-        if (gradeAverage < table[0].grade5) {
-            const ratio = (gradeAverage - topRange.grade5) / (table[0].grade5 - topRange.grade5);
-            return topRange.maxGrade9 + ((table[0].grade9 - topRange.maxGrade9) * ratio);
+        if (topRange) {
+            if (gradeAverage <= topRange.grade5) {
+                return topRange.maxGrade9;
+            }
+
+            if (gradeAverage < table[0].grade5) {
+                const ratio = (gradeAverage - topRange.grade5) / (table[0].grade5 - topRange.grade5);
+                return topRange.maxGrade9 + ((table[0].grade9 - topRange.maxGrade9) * ratio);
+            }
+        } else if (gradeAverage <= table[0].grade5) {
+            return table[0].grade9;
         }
 
         const lastPoint = table[table.length - 1];
@@ -1547,6 +1605,21 @@ class ScoreAnalyzer {
         return lastPoint.grade9;
     }
 
+    estimateNineGradeAverageFromFiveGradeAverage(gradeAverage) {
+        return this.estimateNineGradeAverageFromReferenceTable(
+            gradeAverage,
+            this.getBusanGradeAverageToNineGradeTable(),
+            { topRange: this.getBusanTopNineGradeRange() }
+        );
+    }
+
+    estimateGyeonggiNineGradeAverageFromFiveGradeAverage(gradeAverage) {
+        return this.estimateNineGradeAverageFromReferenceTable(
+            gradeAverage,
+            this.getGyeonggiGradeAverageToNineGradeTable()
+        );
+    }
+
     formatWeightedAverage9GradeDisplay(student, subjects) {
         if (!student || student.weightedAverage9Grade === null || student.weightedAverage9Grade === undefined) {
             return 'N/A';
@@ -1557,6 +1630,56 @@ class ScoreAnalyzer {
         }
 
         return student.weightedAverage9Grade.toFixed(2);
+    }
+
+    getRegionalNineGradeReferenceDisplays(student, subjects) {
+        if (!this.usesRegionalNineGradeReference(student, subjects)) {
+            return [];
+        }
+
+        const displays = [];
+        const busanDisplay = this.formatWeightedAverage9GradeDisplay(student, subjects);
+        const gyeonggiEstimate = this.estimateGyeonggiNineGradeAverageFromFiveGradeAverage(student?.weightedAverageGrade);
+
+        if (busanDisplay !== 'N/A') {
+            displays.push({ label: '부산', value: busanDisplay });
+        }
+
+        if (gyeonggiEstimate !== null) {
+            displays.push({ label: '경기', value: gyeonggiEstimate.toFixed(2) });
+        }
+
+        return displays;
+    }
+
+    getNineGradeReferenceNoteHtml(student, subjects) {
+        if (!this.usesRegionalNineGradeReference(student, subjects)) {
+            return '';
+        }
+
+        return '<span class="summary-note">환산기준 : 부산시교육청 자료 / 경기도교육청 자료(2학기 발표 누적비 기준)</span>';
+    }
+
+    renderNineGradeSummaryContent(student, subjects) {
+        const regionalDisplays = this.getRegionalNineGradeReferenceDisplays(student, subjects);
+
+        if (regionalDisplays.length === 0) {
+            return `<span class="summary-value orange">${this.formatWeightedAverage9GradeDisplay(student, subjects)}</span>`;
+        }
+
+        const regionalHtml = regionalDisplays
+            .map(item => `
+                <span class="summary-reference-item">
+                    <span class="summary-reference-label">${item.label}</span>
+                    <span class="summary-reference-value">${item.value}</span>
+                </span>
+            `)
+            .join('');
+
+        return `
+            <span class="summary-reference-list">${regionalHtml}</span>
+            ${this.getNineGradeReferenceNoteHtml(student, subjects)}
+        `;
     }
 
     // (제거됨) 5등급 기반 9등급 하한 강제 로직은 오류 탐지 가시성을 해치므로 사용하지 않음
@@ -1603,7 +1726,7 @@ class ScoreAnalyzer {
         return this.estimateNineGradeAverageFromFiveGradeAverage(student.weightedAverageGrade);
     }
 
-    usesBusanNineGradeReference(student, subjects) {
+    usesRegionalNineGradeReference(student, subjects) {
         if (!student || student.weightedAverage9Grade === null || student.weightedAverage9Grade === undefined) {
             return false;
         }
@@ -1614,6 +1737,10 @@ class ScoreAnalyzer {
         }
 
         return this.calculateExactWeightedAverage9Grade(student, subjects) === null;
+    }
+
+    usesBusanNineGradeReference(student, subjects) {
+        return this.usesRegionalNineGradeReference(student, subjects);
     }
 
 
@@ -3422,11 +3549,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const navigationLabel = navigationStudents.length > 0 && navigationIndex >= 0
             ? `${navigationIndex + 1} / ${navigationStudents.length}`
             : '';
-        const usesBusanReference = this.usesBusanNineGradeReference(student, this.combinedData.subjects);
-        const nineGradeReferenceNote = usesBusanReference
-            ? '<span class="summary-note">환산기준 : 부산시교육청 자료</span>'
-            : '';
-        
         const html = `
             <div class="print-controls">
                 <div class="student-nav-controls">
@@ -3482,8 +3604,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     <div class="summary-item">
                                         <span class="summary-label">평균등급(9등급환산)</span>
                                         <span class="summary-value-group">
-                                            <span class="summary-value orange">${this.formatWeightedAverage9GradeDisplay(student, this.combinedData.subjects)}</span>
-                                            ${nineGradeReferenceNote}
+                                            ${this.renderNineGradeSummaryContent(student, this.combinedData.subjects)}
                                         </span>
                                     </div>
                                     <div class="summary-item">
@@ -3541,10 +3662,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const averageGradeRank = student.averageGradeRank;
         const sameGradeCount = student.sameGradeCount;
         const totalGradedStudents = student.totalGradedStudents;
-        const usesBusanReference = this.usesBusanNineGradeReference(student, this.combinedData.subjects);
-        const nineGradeReferenceNote = usesBusanReference
-            ? '<span class="summary-note">환산기준 : 부산시교육청 자료</span>'
-            : '';
         return `
             <div class="student-print-page">
                 <div id="printArea-${canvasId}" class="print-area">
@@ -3592,8 +3709,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                         <div class="summary-item">
                                             <span class="summary-label">평균등급(9등급환산)</span>
                                             <span class="summary-value-group">
-                                                <span class="summary-value orange">${this.formatWeightedAverage9GradeDisplay(student, this.combinedData.subjects)}</span>
-                                                ${nineGradeReferenceNote}
+                                                ${this.renderNineGradeSummaryContent(student, this.combinedData.subjects)}
                                             </span>
                                         </div>
                                         <div class="summary-item">
