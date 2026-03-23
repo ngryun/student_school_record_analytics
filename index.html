@@ -55,6 +55,11 @@
             <div class="results-export-bar">
                 <button id="exportCsvBtn" class="analyze-btn secondary-btn" disabled>취합용 DB 파일 생성</button>
                 <button id="exportHtmlBtn" class="analyze-btn secondary-btn" disabled>분석결과 HTML 저장</button>
+                <label class="rank-visibility-toggle" for="rankVisibilityToggle">
+                    <input type="checkbox" id="rankVisibilityToggle" checked>
+                    <span class="rank-visibility-switch" aria-hidden="true"></span>
+                    <span class="rank-visibility-text">순위 표시</span>
+                </label>
             </div>
             <div class="tabs" role="tablist">
                 <button class="tab-btn active" data-tab="subjects" role="tab" aria-selected="true" aria-controls="subjects-tab">과목별 분석</button>

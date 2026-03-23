@@ -2388,6 +2388,11 @@ header h1 {
         justify-content: center;
     }
 
+    .rank-visibility-toggle {
+        width: 100%;
+        justify-content: center;
+    }
+
     .print-controls,
     .student-nav-controls {
         justify-content: center;
@@ -2678,9 +2683,88 @@ header h1 {
 .results-export-bar {
     display: flex;
     gap: 10px;
+    align-items: center;
     justify-content: flex-end;
     margin-bottom: 20px;
     flex-wrap: wrap;
+}
+
+.rank-visibility-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border: 1px solid var(--neutral-300);
+    border-radius: 999px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.rank-visibility-toggle:hover {
+    border-color: var(--primary);
+    background: var(--neutral-50);
+}
+
+.rank-visibility-toggle input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
+.rank-visibility-switch {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--neutral-300);
+    transition: background-color 0.2s ease;
+    flex-shrink: 0;
+}
+
+.rank-visibility-switch::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+    transition: transform 0.2s ease;
+}
+
+.rank-visibility-toggle input:checked + .rank-visibility-switch {
+    background: var(--primary);
+}
+
+.rank-visibility-toggle input:checked + .rank-visibility-switch::after {
+    transform: translateX(18px);
+}
+
+.rank-visibility-toggle input:focus-visible + .rank-visibility-switch {
+    box-shadow: 0 0 0 4px var(--primary-bg);
+}
+
+.results-section.rankings-hidden .ranking-visibility-target,
+.rankings-hidden .ranking-visibility-target,
+.results-section.rankings-hidden .rank-column,
+.rankings-hidden .rank-column,
+.results-section.rankings-hidden .rank-sort-control,
+.rankings-hidden .rank-sort-control {
+    display: none !important;
 }
 
 /* ========================================

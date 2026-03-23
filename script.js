@@ -8,6 +8,7 @@ class ScoreAnalyzer {
         this.handleStudentDetailKeydown = this.handleStudentDetailKeydown.bind(this);
         this._sortColumn = null; // 학생 테이블 정렬 기준
         this._sortAsc = true; // 정렬 방향
+        this._showRankings = true; // 순위 표시 여부
         this.initializeEventListeners();
 
         // If the page provides preloaded analysis data, render directly
@@ -19,6 +20,9 @@ class ScoreAnalyzer {
     async initializePreloadedView() {
         try {
             await this.subjectGroupsReady;
+            if (window.PRELOADED_UI_STATE && Object.prototype.hasOwnProperty.call(window.PRELOADED_UI_STATE, 'showRankings')) {
+                this._showRankings = window.PRELOADED_UI_STATE.showRankings !== false;
+            }
             this.combinedData = window.PRELOADED_DATA;
             this.setIntroSectionVisible(false);
             const results = document.getElementById('results');
@@ -50,13 +54,53 @@ class ScoreAnalyzer {
             selectedGrade: document.getElementById('gradeSelect')?.value || '',
             selectedClass: document.getElementById('classSelect')?.value || '',
             selectedStudent: document.getElementById('studentSelect')?.value || '',
-            studentNameSearch: document.getElementById('studentNameSearch')?.value || ''
+            studentNameSearch: document.getElementById('studentNameSearch')?.value || '',
+            showRankings: this._showRankings
         };
+    }
+
+    applyRankVisibilityState() {
+        const rankVisibilityToggle = document.getElementById('rankVisibilityToggle');
+        if (rankVisibilityToggle) {
+            rankVisibilityToggle.checked = this._showRankings;
+        }
+
+        const results = document.getElementById('results');
+        if (results) {
+            results.classList.toggle('rankings-hidden', !this._showRankings);
+            results.dataset.showRankings = this._showRankings ? 'true' : 'false';
+        }
+
+        document.querySelectorAll('.print-area, .student-print-page').forEach((element) => {
+            element.classList.toggle('rankings-hidden', !this._showRankings);
+        });
+    }
+
+    setRankVisibility(visible) {
+        const nextValue = visible !== false;
+        const didChange = this._showRankings !== nextValue;
+        this._showRankings = nextValue;
+
+        if (!this._showRankings && this._sortColumn === 'rank') {
+            this._sortColumn = null;
+            this._sortAsc = true;
+        }
+
+        this.applyRankVisibilityState();
+
+        if (didChange && this.combinedData) {
+            this.filterStudentTable();
+        }
     }
 
     applyPreloadedUiState() {
         const state = window.PRELOADED_UI_STATE;
         if (!state || !this.combinedData) return;
+
+        if (Object.prototype.hasOwnProperty.call(state, 'showRankings')) {
+            this._showRankings = state.showRankings !== false;
+        }
+        this.applyRankVisibilityState();
 
         const gradeSelect = document.getElementById('gradeSelect');
         const classSelect = document.getElementById('classSelect');
@@ -226,6 +270,7 @@ class ScoreAnalyzer {
         const analyzeBtn = document.getElementById('analyzeBtn');
         const exportCsvBtn = document.getElementById('exportCsvBtn');
         const exportHtmlBtn = document.getElementById('exportHtmlBtn');
+        const rankVisibilityToggle = document.getElementById('rankVisibilityToggle');
         const tabBtns = document.querySelectorAll('.tab-btn');
         const gradeSelect = document.getElementById('gradeSelect');
         const classSelect = document.getElementById('classSelect');
@@ -303,7 +348,11 @@ class ScoreAnalyzer {
 
         if (exportHtmlBtn) exportHtmlBtn.addEventListener('click', () => { this.showHtmlExportOptionsModal(); });
 
-        
+        if (rankVisibilityToggle) {
+            rankVisibilityToggle.addEventListener('change', (event) => {
+                this.setRankVisibility(event.target.checked);
+            });
+        }
 
         if (tabBtns && tabBtns.length) {
             tabBtns.forEach(btn => {
@@ -370,6 +419,7 @@ class ScoreAnalyzer {
 
         // Mobile filter toggle
         this._setupMobileFilterToggle();
+        this.applyRankVisibilityState();
     }
 
     _setupMobileFilterToggle() {
@@ -1749,6 +1799,7 @@ class ScoreAnalyzer {
         this.displaySubjectAverages();
         this.displayGradeAnalysis();
         this.displayStudentAnalysis();
+        this.applyRankVisibilityState();
 
         // Restore tab from URL hash, or default to grade-analysis
         const hash = location.hash.replace('#', '');
@@ -3267,11 +3318,11 @@ document.addEventListener('DOMContentLoaded', () => {
             { key: 'number', label: '번호순' },
             { key: 'name', label: '이름순' },
             { key: 'avgGrade', label: '평균등급순' },
-            { key: 'rank', label: '순위순' }
+            ...(this._showRankings ? [{ key: 'rank', label: '순위순' }] : [])
         ];
         sortOptions.forEach(opt => {
             const btn = document.createElement('button');
-            btn.className = 'subject-filter-btn' + (this._sortColumn === opt.key ? ' active' : '');
+            btn.className = 'subject-filter-btn' + (this._sortColumn === opt.key ? ' active' : '') + (opt.key === 'rank' ? ' rank-sort-control' : '');
             const arrow = this._sortColumn === opt.key ? (this._sortAsc ? ' \u25B2' : ' \u25BC') : '';
             btn.textContent = opt.label + arrow;
             btn.addEventListener('click', () => this._toggleSort(opt.key));
@@ -3336,7 +3387,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="metric-value">${student.weightedAverageGrade ? student.weightedAverageGrade.toFixed(2) : 'N/A'}</span>
                             </div>
                             ${averageGradeRank !== null && averageGradeRank !== undefined ? `
-                            <div class="summary-metric-inline">
+                            <div class="summary-metric-inline ranking-visibility-target">
                                 <span class="metric-label">등급순위</span>
                                 <span class="metric-value">${averageGradeRank}/${totalGradedStudents}위${sameGradeCount > 1 ? ` (${sameGradeCount}명)` : ''}</span>
                             </div>
@@ -3559,7 +3610,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button class="pdf-btn" onclick="scoreAnalyzer.generatePDF('${student.name}')">PDF 저장</button>
             </div>
             
-            <div id="printArea" class="print-area">
+            <div id="printArea" class="print-area${this._showRankings ? '' : ' rankings-hidden'}">
                 <div class="print-header" style="display: none;">
                     <h2>학생 성적 분석 보고서</h2>
                     <div class="print-date">생성일: ${new Date().toLocaleDateString('ko-KR')}</div>
@@ -3607,7 +3658,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                             ${this.renderNineGradeSummaryContent(student, this.combinedData.subjects)}
                                         </span>
                                     </div>
-                                    <div class="summary-item">
+                                    <div class="summary-item ranking-visibility-target">
                                         <span class="summary-label">등급 순위</span>
                                         <span class="summary-value highlight">${averageGradeRank !== null && averageGradeRank !== undefined ? `${averageGradeRank}/${totalGradedStudents}위` + (sameGradeCount > 1 ? ` (${sameGradeCount}명)` : '') : 'N/A'}</span>
                                     </div>
@@ -3663,8 +3714,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const sameGradeCount = student.sameGradeCount;
         const totalGradedStudents = student.totalGradedStudents;
         return `
-            <div class="student-print-page">
-                <div id="printArea-${canvasId}" class="print-area">
+            <div class="student-print-page${this._showRankings ? '' : ' rankings-hidden'}">
+                <div id="printArea-${canvasId}" class="print-area${this._showRankings ? '' : ' rankings-hidden'}">
                     <div class="print-header" style="display: none;">
                         <h2>학생 성적 분석 보고서</h2>
                         <div class="print-date">생성일: ${new Date().toLocaleDateString('ko-KR')}</div>
@@ -3712,7 +3763,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                                 ${this.renderNineGradeSummaryContent(student, this.combinedData.subjects)}
                                             </span>
                                         </div>
-                                        <div class="summary-item">
+                                        <div class="summary-item ranking-visibility-target">
                                             <span class="summary-label">등급 순위</span>
                                             <span class="summary-value highlight">${averageGradeRank !== null && averageGradeRank !== undefined ? `${averageGradeRank}/${totalGradedStudents}위` + (sameGradeCount > 1 ? ` (${sameGradeCount}명)` : '') : 'N/A'}</span>
                                         </div>
@@ -4111,7 +4162,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <th>점수</th>
                                 <th>성취도</th>
                                 <th>등급</th>
-                                <th>석차</th>
+                                <th class="rank-column ranking-visibility-target">석차</th>
                                 <th>백분위</th>
                                 <th>9등급</th>
                             </tr>
@@ -4171,7 +4222,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </td>
                 <td class="center"><span class="achievement-badge ${achievement}">${achievement}</span></td>
                 <td class="center">${hasGrade ? grade : '-'}</td>
-                <td class="center">${rank}</td>
+                <td class="center rank-column ranking-visibility-target">${rank}</td>
                 <td class="center"><span class="percentile ${percentileClass}">${percentile !== null ? percentile + '%' : '-'}</span></td>
                 <td class="center"><span class="${grade9 ? 'grade9-value' : ''}">${grade9 || '-'}</span></td>
             </tr>
