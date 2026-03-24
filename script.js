@@ -93,6 +93,33 @@ class ScoreAnalyzer {
         }
     }
 
+    getRadarLabelPlacement(index, totalPoints, pointValue) {
+        const safeTotal = Math.max(totalPoints || 1, 1);
+        const angle = (-Math.PI / 2) + ((Math.PI * 2 * index) / safeTotal);
+        const outwardAngle = ((angle * 180) / Math.PI + 360) % 360;
+        const inwardAngle = (((angle + Math.PI) * 180) / Math.PI + 360) % 360;
+        const isNearVertical = Math.abs(Math.cos(angle)) < 0.3;
+
+        if (pointValue >= 4.4) {
+            return {
+                align: inwardAngle,
+                offset: isNearVertical ? 16 : 18
+            };
+        }
+
+        if (pointValue >= 3.6) {
+            return {
+                align: inwardAngle,
+                offset: isNearVertical ? 10 : 12
+            };
+        }
+
+        return {
+            align: outwardAngle,
+            offset: isNearVertical ? 10 : 12
+        };
+    }
+
     applyPreloadedUiState() {
         const state = window.PRELOADED_UI_STATE;
         if (!state || !this.combinedData) return;
@@ -3813,6 +3840,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const gradeData = sortedGroups.map(([name, data]) => 6 - data.averageGrade);
         const colors = sortedGroups.map(([name, data]) => data.color);
         const originalGrades = sortedGroups.map(([name, data]) => data.averageGrade);
+        const getPlacement = (dataIndex) => this.getRadarLabelPlacement(dataIndex, labels.length, gradeData[dataIndex]);
 
         // 기존 차트 인스턴스가 해당 캔버스에 남아있다면 파괴
         try {
@@ -3840,6 +3868,14 @@ document.addEventListener('DOMContentLoaded', () => {
             options: {
                 responsive: true,
                 maintainAspectRatio: true,
+                layout: {
+                    padding: {
+                        top: 16,
+                        right: 10,
+                        bottom: 10,
+                        left: 10
+                    }
+                },
                 animation: {
                     duration: 0
                 },
@@ -3866,11 +3902,21 @@ document.addEventListener('DOMContentLoaded', () => {
                         },
                         borderWidth: 2,
                         borderRadius: 6,
-                        padding: 6,
+                        padding: {
+                            top: 6,
+                            bottom: 6,
+                            left: 8,
+                            right: 8
+                        },
                         font: {
                             size: 11,
                             weight: 'bold'
-                        }
+                        },
+                        anchor: 'center',
+                        align: (context) => getPlacement(context.dataIndex).align,
+                        offset: (context) => getPlacement(context.dataIndex).offset,
+                        clamp: true,
+                        textAlign: 'center'
                     }
                 },
                 scales: {
@@ -3897,6 +3943,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 size: 13,
                                 weight: '600'
                             },
+                            padding: 10,
                             color: function(context) {
                                 return colors[context.index] || '#2c3e50';
                             }
@@ -4159,7 +4206,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <tr>
                                 <th>과목</th>
                                 <th>학점</th>
-                                <th>점수</th>
+                                <th>원점수(평균)</th>
                                 <th>성취도</th>
                                 <th>등급</th>
                                 <th class="rank-column ranking-visibility-target">석차</th>
@@ -4261,6 +4308,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const colors = sortedGroups.map(([name, data]) => data.color);
         const originalGrades = sortedGroups.map(([name, data]) => data.averageGrade);
         const subjectDetails = sortedGroups.map(([name, data]) => data.subjects);
+        const getPlacement = (dataIndex) => this.getRadarLabelPlacement(dataIndex, labels.length, gradeData[dataIndex]);
 
         this.studentPercentileChart = new Chart(ctx, {
             type: 'radar',
@@ -4281,7 +4329,15 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: true,
+                maintainAspectRatio: false,
+                layout: {
+                    padding: {
+                        top: 16,
+                        right: 10,
+                        bottom: 10,
+                        left: 10
+                    }
+                },
                 interaction: {
                     intersect: false
                 },
@@ -4339,9 +4395,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             const idx = context.dataIndex;
                             return originalGrades[idx].toFixed(2) + '등급';
                         },
-                        anchor: 'end',
-                        align: 'top',
-                        offset: 12,
+                        anchor: 'center',
+                        align: (context) => getPlacement(context.dataIndex).align,
+                        offset: (context) => getPlacement(context.dataIndex).offset,
+                        clamp: true,
                         textAlign: 'center'
                     }
                 },
@@ -4373,6 +4430,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 size: 14,
                                 weight: '600'
                             },
+                            padding: 10,
                             color: function(context) {
                                 return colors[context.index] || '#2c3e50';
                             }

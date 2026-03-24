@@ -1529,7 +1529,7 @@ header h1 {
     text-align: center;
     border: 1px solid var(--border-light);
     width: 100%;
-    max-width: 420px;
+    max-width: 460px;
     justify-self: end;
 }
 
@@ -1542,8 +1542,8 @@ header h1 {
 
 .chart-container canvas {
     display: block;
-    width: min(100%, 320px) !important;
-    height: auto !important;
+    width: min(100%, 360px) !important;
+    height: 360px !important;
     margin: 0 auto;
 }
 
