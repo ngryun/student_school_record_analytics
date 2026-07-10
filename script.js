@@ -203,6 +203,9 @@ class ScoreAnalyzer {
                 "과학": { keywords: ["과학", "물리", "화학", "생명", "지구", "탐구실험", "생물"], color: "#9b59b6", order: 5 },
                 "기타": { keywords: [], color: "#95a5a6", order: 6 }
             },
+            priorityKeywords: {
+                "기타": ["일본어", "중국어"]
+            },
             exactMatch: {
                 "한국사1": "사회", "한국사2": "사회",
                 "통합사회1": "사회", "통합사회2": "사회",
@@ -223,7 +226,16 @@ class ScoreAnalyzer {
             return this.subjectGroups.exactMatch[subjectName];
         }
 
-        // 2. 키워드 기반 매핑
+        // 2. 부분 문자열 충돌 가능성이 있는 과목을 우선 매핑
+        if (this.subjectGroups.priorityKeywords) {
+            for (const [groupName, keywords] of Object.entries(this.subjectGroups.priorityKeywords)) {
+                if (keywords.some(keyword => subjectName.includes(keyword))) {
+                    return groupName;
+                }
+            }
+        }
+
+        // 3. 키워드 기반 매핑
         for (const [groupName, groupData] of Object.entries(this.subjectGroups.groups)) {
             if (groupName === "기타") continue; // 기타는 마지막에 처리
             for (const keyword of groupData.keywords) {
@@ -233,7 +245,7 @@ class ScoreAnalyzer {
             }
         }
 
-        // 3. 매칭되지 않으면 기타
+        // 4. 매칭되지 않으면 기타
         return "기타";
     }
 
