@@ -231,10 +231,58 @@ class ScoreAnalyzer {
         };
     }
 
-    // 과목명을 교과(군)으로 매핑
-    getSubjectGroup(subjectName) {
+    // 원본 양식의 교과(군) 값을 프로그램의 표준 교과군 이름으로 정규화
+    normalizeSourceSubjectGroup(sourceGroup) {
+        const normalized = String(sourceGroup || '')
+            .normalize('NFKC')
+            .replace(/\s+/g, '')
+            .replace(/[()\/·ㆍ⋅]/g, '');
+
+        if (!normalized) return '';
+
+        const aliases = {
+            '국어': "국어",
+            '국어과': "국어",
+            '수학': "수학",
+            '수학과': "수학",
+            '영어': "영어",
+            '영어과': "영어",
+            '사회': "사회",
+            '사회역사도덕포함': "사회",
+            '역사': "사회",
+            '도덕': "사회",
+            '한국사': "사회",
+            '과학': "과학",
+            '과학과': "과학",
+            '체육': "체육",
+            '체육과': "체육",
+            '예술': "예술",
+            '예술음악미술': "예술",
+            '음악': "예술",
+            '미술': "예술",
+            '기술가정정보': "기술·가정/정보",
+            '기술가정': "기술·가정/정보",
+            '정보': "기술·가정/정보",
+            '제2외국어한문': "제2외국어/한문",
+            '제2외국어': "제2외국어/한문",
+            '한문': "제2외국어/한문",
+            '교양': "교양"
+        };
+
+        const matchedGroup = aliases[normalized] || '';
+        if (!matchedGroup || !this.subjectGroups?.groups?.[matchedGroup]) return '';
+        return matchedGroup;
+    }
+
+    // 원본 교과(군)을 우선 사용하고, 없으면 과목명으로 교과(군)을 매핑
+    getSubjectGroup(subjectName, sourceGroup = '') {
         if (!this.subjectGroups) {
             return "기타";
+        }
+
+        const normalizedSourceGroup = this.normalizeSourceSubjectGroup(sourceGroup);
+        if (normalizedSourceGroup) {
+            return normalizedSourceGroup;
         }
 
         // 1. 정확히 일치하는 항목 먼저 확인
@@ -267,7 +315,7 @@ class ScoreAnalyzer {
 
     getSubjectColumnLabel(subject) {
         if (!subject || !subject.name) return '';
-        return `${this.getSubjectGroup(subject.name)}_${subject.name}`;
+        return `${this.getSubjectGroup(subject.name, subject.sourceGroup)}_${subject.name}`;
     }
 
     // 학생의 교과(군)별 평균 등급 계산
@@ -289,7 +337,7 @@ class ScoreAnalyzer {
         this.combinedData.subjects.forEach(subject => {
             const grade = student.grades[subject.name];
             if (grade !== undefined && grade !== null && !isNaN(grade)) {
-                const groupName = this.getSubjectGroup(subject.name);
+                const groupName = this.getSubjectGroup(subject.name, subject.sourceGroup);
                 if (!groupData[groupName]) {
                     groupData[groupName] = { totalGradePoints: 0, totalCredits: 0, subjects: [] };
                 }
@@ -666,10 +714,19 @@ class ScoreAnalyzer {
                     subjectMap.set(key, {
                         name: subject.name,
                         credits: subject.credits,
+                        sourceGroup: subject.sourceGroup || '',
                         averages: [],
                         distributions: [],
                         columnIndex: subject.columnIndex
                     });
+                }
+                const combinedSubject = subjectMap.get(key);
+                if (subject.sourceGroup && (
+                    !combinedSubject.sourceGroup ||
+                    (!this.normalizeSourceSubjectGroup(combinedSubject.sourceGroup) &&
+                        this.normalizeSourceSubjectGroup(subject.sourceGroup))
+                )) {
+                    combinedSubject.sourceGroup = subject.sourceGroup;
                 }
                 // 각 파일의 평균과 분포 저장
                 subjectMap.get(key).averages.push(subject.average || 0);
@@ -1200,6 +1257,9 @@ class ScoreAnalyzer {
             }
 
             const subjectInfo = subjectMap.get(subName);
+            if (!subjectInfo.group && subjectGroup) {
+                subjectInfo.group = subjectGroup;
+            }
             if (subjectAvg > 0) subjectInfo.averages.push(subjectAvg);
             if (distRaw && String(distRaw).trim() !== '') {
                 subjectInfo.rawDistributions.push(String(distRaw).trim());
@@ -1248,6 +1308,7 @@ class ScoreAnalyzer {
             const subject = {
                 name: info.name,
                 credits: info.credits,
+                sourceGroup: info.group || '',
                 columnIndex: idx,
                 average: info.averages.length > 0
                     ? info.averages.reduce((sum, value) => sum + value, 0) / info.averages.length
@@ -2594,7 +2655,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Build subject filter bar
         const groups = new Set();
-        this.combinedData.subjects.forEach(s => groups.add(this.getSubjectGroup(s.name)));
+        this.combinedData.subjects.forEach(s => groups.add(this.getSubjectGroup(s.name, s.sourceGroup)));
         let filterBar = document.getElementById('subjectFilterBar');
         if (!filterBar) {
             filterBar = document.createElement('div');
@@ -2629,7 +2690,7 @@ document.addEventListener('DOMContentLoaded', () => {
         this.combinedData.subjects.forEach(subject => {
             const subjectDiv = document.createElement('div');
             subjectDiv.className = 'subject-item';
-            subjectDiv.dataset.group = this.getSubjectGroup(subject.name);
+            subjectDiv.dataset.group = this.getSubjectGroup(subject.name, subject.sourceGroup);
 
             // 성취도 분포 HTML 생성
             let distributionHTML = '';
@@ -4198,7 +4259,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const groupName = this.getSubjectGroup(subject.name);
+            const groupName = this.getSubjectGroup(subject.name, subject.sourceGroup);
             if (!groupedSubjects[groupName]) {
                 groupedSubjects[groupName] = {
                     subjects: [],
@@ -4727,7 +4788,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 교과군 목록 추출 (순서대로)
             const subjectGroups = {};
             subjects.forEach(subject => {
-                const groupName = this.getSubjectGroup(subject.name);
+                const groupName = this.getSubjectGroup(subject.name, subject.sourceGroup);
                 if (!subjectGroups[groupName]) {
                     subjectGroups[groupName] = {
                         subjects: [],

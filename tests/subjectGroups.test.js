@@ -95,6 +95,65 @@ for (const subject of ['중국어Ⅰ', '생활 중국어', '일본어Ⅰ', '생�
     assert.equal(fallbackAnalyzer.getSubjectGroup(subject), '제2외국어/한문', `default: ${subject}`);
 }
 
+const sourceGroupCases = [
+    ['임의 과목', '사회(역사/도덕 포함)', '사회'],
+    ['중국어', '제2외국어/한문', '제2외국어/한문'],
+    ['데이터 과학', '정보', '기술·가정/정보'],
+    ['임의 과목', '예술(음악/미술)', '예술'],
+    ['미술', '체육·예술', '예술'],
+    ['중국어', '기술·가정/정보/제2외국어/한문/교양', '제2외국어/한문'],
+    ['중국어', '알 수 없는 교과', '제2외국어/한문']
+];
+for (const [subject, sourceGroup, expectedGroup] of sourceGroupCases) {
+    assert.equal(
+        configuredAnalyzer.getSubjectGroup(subject, sourceGroup),
+        expectedGroup,
+        `${sourceGroup} / ${subject}`
+    );
+}
+
+const gradeReportData = [
+    [],
+    [],
+    ['2026학년도 1학기 1학년 1반'],
+    ['번호', '성명', '학년', '학기', '교과', '과목명', '학점', '원점수', '과목평균', '석차등급', '수강자수'],
+    [1, '테스트 학생', 1, 1, '제2외국어/한문', '중국어', 3, 90, 80, 1, 100]
+];
+const parsedGradeReport = configuredAnalyzer.parseGradeReport(gradeReportData, 'grade-report.xls');
+assert.equal(parsedGradeReport.subjects[0].sourceGroup, '제2외국어/한문');
+
+const xlsData = [
+    [],
+    [],
+    ['2026학년도 1학기 주간 1학년 1반'],
+    ['', '', '', '중국어(3)'],
+    ['', '', '', 80],
+    ['', '', '', 'A(20)B(20)C(20)D(20)E(20)'],
+    [1, '테스트 학생', '', '90(90)'],
+    ['', '', '', 'A'],
+    ['', '', '', 1],
+    ['', '', '', 1],
+    ['', '', '', 100]
+];
+const parsedXlsData = configuredAnalyzer.parseFileData(xlsData, 'xls-data.xls');
+assert.equal(parsedXlsData.format, 'xls-data');
+assert.equal(parsedXlsData.subjects[0].sourceGroup, undefined);
+assert.equal(configuredAnalyzer.getSubjectGroup(parsedXlsData.subjects[0].name), '제2외국어/한문');
+
+configuredAnalyzer.filesData = new Map([
+    ['xls-data.xls', parsedXlsData],
+    ['grade-report.xls', parsedGradeReport]
+]);
+configuredAnalyzer.combineAllData();
+assert.equal(configuredAnalyzer.combinedData.subjects[0].sourceGroup, '제2외국어/한문');
+assert.equal(
+    configuredAnalyzer.getSubjectGroup(
+        configuredAnalyzer.combinedData.subjects[0].name,
+        configuredAnalyzer.combinedData.subjects[0].sourceGroup
+    ),
+    '제2외국어/한문'
+);
+
 const toPlainObject = value => JSON.parse(JSON.stringify(value));
 assert.deepEqual(toPlainObject(fallbackAnalyzer.subjectGroups.groups), configuredAnalyzer.subjectGroups.groups);
 assert.deepEqual(toPlainObject(fallbackAnalyzer.subjectGroups.priorityKeywords), configuredAnalyzer.subjectGroups.priorityKeywords);
