@@ -99,6 +99,15 @@ header {
     padding: 28px 36px 24px;
     text-align: left;
     border-bottom: 1px solid var(--neutral-200);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 32px;
+}
+
+.header-copy {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 header h1 {
@@ -114,6 +123,14 @@ header h1 {
     color: var(--text-secondary);
     max-width: 720px;
     line-height: 1.6;
+}
+
+.brand-bi {
+    display: block;
+    flex: 0 0 auto;
+    width: min(30vw, 300px);
+    min-width: 220px;
+    height: auto;
 }
 
 .badge-lite {
@@ -2301,6 +2318,9 @@ header h1 {
 
     header {
         padding: 20px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 18px;
     }
 
     header h1 {
@@ -2309,6 +2329,12 @@ header h1 {
 
     .header-subtitle {
         font-size: 0.92rem;
+    }
+
+    .brand-bi {
+        align-self: center;
+        width: min(100%, 280px);
+        min-width: 0;
     }
 
     .upload-section,
