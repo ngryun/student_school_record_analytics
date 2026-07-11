@@ -4695,9 +4695,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     <h4>보안</h4>
                     <p>모든 데이터는 브라우저에서만 처리되며, 서버로 전송되지 않습니다.</p>
                 </div>
-                <p style="font-size:0.82rem;color:var(--text-muted);margin-top:12px;">
-                    자세한 도움말: <a href="https://namgungyeon.tistory.com/133" target="_blank" rel="noopener" style="color:var(--primary);">온라인 가이드</a>
-                </p>
                 <button class="help-close-btn">닫기</button>
             </div>
         `;
