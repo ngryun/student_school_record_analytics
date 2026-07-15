@@ -635,9 +635,38 @@ class ScoreAnalyzer {
             const totalFiles = files.length;
             for (let i = 0; i < files.length; i++) {
                 this.updateLoadingProgress(i, totalFiles, files[i].name);
-                const data = await this.readExcelFile(files[i]);
-                const fileData = this.parseFileData(data, files[i].name);
-                this.filesData.set(files[i].name, fileData);
+                const sheets = await this.readExcelFile(files[i]);
+                let parsedCount = 0;
+                let firstError = null;
+
+                sheets.forEach((sheet) => {
+                    if (!this.isParsableSheet(sheet.rows)) {
+                        console.log(`[${files[i].name}] 시트 "${sheet.name}" 건너뜀 (데이터 형식 아님)`);
+                        return;
+                    }
+                    try {
+                        const fileData = this.parseFileData(sheet.rows, files[i].name);
+                        if (!fileData.students || fileData.students.length === 0) {
+                            console.log(`[${files[i].name}] 시트 "${sheet.name}" 건너뜀 (학생 데이터 없음)`);
+                            return;
+                        }
+                        fileData.sourceFile = files[i].name;
+                        fileData.sheetName = sheet.name;
+                        const key = sheets.length > 1
+                            ? `${files[i].name} [${sheet.name}]`
+                            : files[i].name;
+                        this.filesData.set(key, fileData);
+                        parsedCount++;
+                        console.log(`[${files[i].name}] 시트 "${sheet.name}" 파싱 완료 (학생 ${fileData.students.length}명)`);
+                    } catch (error) {
+                        console.warn(`[${files[i].name}] 시트 "${sheet.name}" 파싱 실패:`, error);
+                        if (!firstError) firstError = error;
+                    }
+                });
+
+                if (parsedCount === 0) {
+                    throw firstError || new Error(`${files[i].name}: 분석 가능한 시트를 찾지 못했습니다.`);
+                }
             }
             this.updateLoadingProgress(totalFiles, totalFiles, '통합 분석 중...');
 
@@ -699,10 +728,16 @@ class ScoreAnalyzer {
     combineAllData() {
         if (this.filesData.size === 0) return;
 
+        // 파일 수 표시는 시트 단위가 아닌 원본 파일 단위로 집계
+        const uniqueSourceFiles = new Set();
+        this.filesData.forEach((fileData, key) => {
+            uniqueSourceFiles.add(fileData.sourceFile || key);
+        });
+
         this.combinedData = {
             subjects: [],
             students: [],
-            fileNames: Array.from(this.filesData.keys())
+            fileNames: Array.from(uniqueSourceFiles)
         };
 
         // 모든 과목을 통합 (중복 제거)
@@ -946,10 +981,12 @@ class ScoreAnalyzer {
                 try {
                     const data = new Uint8Array(e.target.result);
                     const workbook = XLSX.read(data, { type: 'array' });
-                    const firstSheetName = workbook.SheetNames[0];
-                    const worksheet = workbook.Sheets[firstSheetName];
-                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-                    resolve(jsonData);
+                    // 학기말성적종합일람표는 학생/과목 수가 많으면 여러 시트(페이지)로 나뉘므로 모든 시트를 읽는다
+                    const sheets = workbook.SheetNames.map(name => ({
+                        name: name,
+                        rows: XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1 })
+                    }));
+                    resolve(sheets);
                 } catch (error) {
                     reject(error);
                 }
@@ -957,6 +994,13 @@ class ScoreAnalyzer {
             reader.onerror = () => reject(new Error('파일 읽기 실패'));
             reader.readAsArrayBuffer(file);
         });
+    }
+
+    isParsableSheet(rows) {
+        // 데이터 시트는 최소한 헤더(1~6행)와 학생 데이터(7행~)가 있어야 한다
+        if (!rows || rows.length < 7) return false;
+        if (!Array.isArray(rows[3]) || rows[3].length === 0) return false;
+        return true;
     }
 
     parseFileData(data, fileName) {
