@@ -1020,34 +1020,63 @@ class ScoreAnalyzer {
             format: 'xls-data'
         };
 
-        // A3 셀에서 학년/반 정보 추출 (0-based index로는 행 2, 열 0)
-        if (data[2] && data[2][0]) {
-            const classInfo = data[2][0].toString();
-            console.log('A3 셀 내용:', classInfo); // 디버깅용
-            
-            // "학년도" 뒤에 오는 학년 정보와 "반" 앞에 오는 반 정보 추출
-            // 예: "2025학년도   1학기   주간      1학년     4반"
-            const gradeMatch = classInfo.match(/\s+(\d+)학년/);
-            const classMatch = classInfo.match(/\s+(\d+)반/);
-            
-            if (gradeMatch) {
-                fileData.grade = parseInt(gradeMatch[1]);
-                console.log('추출된 학년:', fileData.grade); // 디버깅용
-            }
-            if (classMatch) {
-                fileData.class = parseInt(classMatch[1]);
-                console.log('추출된 반:', fileData.class); // 디버깅용
+        // 상단 행에서 학년/반 정보 추출 (일반적으로 A3 셀)
+        // 예: "2025학년도   1학기   주간      1학년     4반"
+        for (let r = 0; r < Math.min(data.length, 6); r++) {
+            const cell = data[r] && data[r][0] ? data[r][0].toString() : '';
+            const gradeMatch = cell.match(/\s+(\d+)학년/);
+            const classMatch = cell.match(/\s+(\d+)반/);
+            if (gradeMatch || classMatch) {
+                console.log(`학년/반 정보 (행 ${r + 1}):`, cell);
+                if (gradeMatch) fileData.grade = parseInt(gradeMatch[1]);
+                if (classMatch) fileData.class = parseInt(classMatch[1]);
+                break;
             }
         }
 
-        // 과목명 추출 (행 4, D열부터) - 0-based index로는 행 3
-        const subjectRow = data[3]; // 행 4
-        for (let i = 3; i < subjectRow.length; i++) { // D열부터
+        // 과목 헤더 행 위치 탐색 — 인쇄 페이지가 여러 개면 한 시트 안에서
+        // "번호/성명/과목(학점)" 헤더 블록이 반복된다 (과목 분할 + 학생 분할)
+        const headerRowIndexes = [];
+        for (let r = 0; r < data.length; r++) {
+            if (this.isSubjectHeaderRow(data[r])) headerRowIndexes.push(r);
+        }
+        if (headerRowIndexes.length === 0) headerRowIndexes.push(3); // 기존 고정 레이아웃
+
+        headerRowIndexes.forEach((headerRow, idx) => {
+            const blockEnd = idx + 1 < headerRowIndexes.length ? headerRowIndexes[idx + 1] : data.length;
+            this.parsePageBlock(data, fileData, headerRow, blockEnd);
+        });
+
+        // 전체 과목 기준으로 평균등급 재계산 (블록별 부분 계산값 대체)
+        fileData.students.forEach(student => {
+            student.weightedAverageGrade = this.calculateWeightedAverageGrade(student, fileData.subjects);
+            student.weightedAverage9Grade = this.calculateWeightedAverage9Grade(student, fileData.subjects);
+        });
+        fileData.students.sort((a, b) => a.number - b.number);
+
+        console.log(`[${fileName}] 페이지 블록 ${headerRowIndexes.length}개, 과목 ${fileData.subjects.length}개, 학생 ${fileData.students.length}명 파싱 완료`);
+        return fileData;
+    }
+
+    isSubjectHeaderRow(row) {
+        if (!row || String(row[0] || '').trim() !== '번호') return false;
+        // D열 이후에 "과목명(학점)" 형태가 하나라도 있어야 헤더 행으로 인정
+        for (let c = 3; c < row.length; c++) {
+            if (/^.+\(\d+\)$/.test(String(row[c] || '').trim())) return true;
+        }
+        return false;
+    }
+
+    parsePageBlock(data, fileData, headerRowIndex, blockEnd) {
+        // 과목명 추출 (헤더 행의 D열부터)
+        const subjectRow = data[headerRowIndex] || [];
+        const blockSubjects = [];
+        for (let i = 3; i < subjectRow.length; i++) {
             const cellValue = subjectRow[i];
             if (cellValue && typeof cellValue === 'string' && cellValue.includes('(')) {
-                const match = cellValue.match(/^(.+)\((\d+)\)$/);
+                const match = cellValue.trim().match(/^(.+)\((\d+)\)$/);
                 if (match) {
-                    fileData.subjects.push({
+                    blockSubjects.push({
                         name: match[1].trim(),
                         credits: parseInt(match[2]),
                         columnIndex: i,
@@ -1057,21 +1086,46 @@ class ScoreAnalyzer {
             }
         }
 
-        // 과목별 평균 (행 5) - 0-based index로는 행 4
-        const averageRow = data[4];
-        fileData.subjects.forEach(subject => {
-            const avgValue = averageRow[subject.columnIndex];
-            subject.average = avgValue ? parseFloat(avgValue) : 0;
+        // 헤더 다음의 메타 행(과목평균, 성취도 분포)을 학생 행 시작 전까지 수집
+        let cursor = headerRowIndex + 1;
+        const metaRows = [];
+        while (cursor < blockEnd && metaRows.length < 4) {
+            const row = data[cursor];
+            const first = row ? row[0] : undefined;
+            if (row && first !== undefined && first !== null && first !== '' && !isNaN(first)) break; // 학생 행 시작
+            if (row && row.length > 0) metaRows.push(row);
+            cursor++;
+        }
+
+        let averageRow = metaRows.find(r => String(r[0] || '').includes('평균'));
+        let distributionRow = metaRows.find(r => String(r[0] || '').includes('분포'));
+        // 라벨이 없는 구형 양식은 위치 기반으로 판별 (1번째=평균, 2번째=분포)
+        if (!averageRow && metaRows[0] && !String(metaRows[0][0] || '').includes('분포')) averageRow = metaRows[0];
+        if (!distributionRow && metaRows[1]) distributionRow = metaRows[1];
+
+        if (averageRow) {
+            blockSubjects.forEach(subject => {
+                const avgValue = averageRow[subject.columnIndex];
+                subject.average = avgValue ? parseFloat(avgValue) : 0;
+            });
+        }
+        if (distributionRow) {
+            this.parseAchievementDistribution(distributionRow, blockSubjects);
+        }
+
+        // 이미 등록된 과목(학생 분할 페이지의 반복 헤더)은 재사용하되,
+        // 이 블록에서의 열 위치는 별도로 유지한다
+        const parseSubjects = blockSubjects.map(subject => {
+            const existing = fileData.subjects.find(s =>
+                s.name === subject.name && s.credits === subject.credits);
+            if (existing) {
+                return { ...existing, columnIndex: subject.columnIndex };
+            }
+            fileData.subjects.push(subject);
+            return subject;
         });
 
-        // 성취도 분포 (행 6) - 0-based index로는 행 5
-        const distributionRow = data[5];
-        this.parseAchievementDistribution(distributionRow, fileData.subjects);
-
-        // 학생 데이터 파싱 (행 7부터 시작, 5행씩 묶여있음)
-        this.parseStudentData(data, fileData);
-
-        return fileData;
+        this.parseStudentData(data, fileData, cursor, blockEnd, parseSubjects);
     }
 
     parseAchievementDistribution(distributionRow, subjects) {
@@ -1498,56 +1552,59 @@ class ScoreAnalyzer {
         return match ? match[0] : '';
     }
 
-    parseStudentData(data, fileData) {
-        // 학생 데이터는 행 7부터 시작해서 각 학생마다 5행씩 사용
-        // 행 7: 번호 + 합계(원점수)
-        // 행 8: 성취도
-        // 행 9: 석차등급  
-        // 행 10: 석차
-        // 행 11: 수강자수
-        
-        let consecutiveEmptyRows = 0;
-        const maxConsecutiveEmpty = 15; // 연속으로 15행이 비어있으면 종료
-        
-        for (let i = 6; i < data.length; i += 5) { // 0-based로 행 7부터, 5행씩 건너뛰기
-            const scoreRow = data[i];     // 합계(원점수) 행
+    parseStudentData(data, fileData, startRow, endRow, subjects) {
+        // 학생 데이터는 각 학생마다 5행씩 사용
+        // 행 1: 번호 + 성명 + 합계(원점수)
+        // 행 2: 성취도
+        // 행 3: 석차등급
+        // 행 4: 석차
+        // 행 5: 수강자수
+        // A열이 숫자인 행을 학생 시작 행으로 보고 매번 재정렬한다
+        //  (빈 행이나 반복 헤더가 끼어도 어긋나지 않도록)
+        const start = startRow !== undefined ? startRow : 6;
+        const end = endRow !== undefined ? endRow : data.length;
+        const parseSubjects = subjects || fileData.subjects;
+
+        let i = start;
+        while (i < end) {
+            const scoreRow = data[i];
+            const first = scoreRow ? scoreRow[0] : undefined;
+            if (first === undefined || first === null || first === '' || isNaN(first)) {
+                i++;
+                continue;
+            }
+
             const achievementRow = data[i + 1]; // 성취도 행
             const gradeRow = data[i + 2];       // 석차등급 행
             const rankRow = data[i + 3];        // 석차 행
             const totalRow = data[i + 4];       // 수강자수 행
-            
-            // 학생 번호가 있는지 확인 (A열)
-            if (!scoreRow || !scoreRow[0] || isNaN(scoreRow[0])) {
-                consecutiveEmptyRows += 5; // 5행씩 건너뛰므로 5 증가
-                if (consecutiveEmptyRows >= maxConsecutiveEmpty) {
-                    console.log(`연속으로 ${consecutiveEmptyRows}행이 비어있어 파싱을 종료합니다. (행 ${i + 1})`);
-                    break;
-                }
-                continue; // 빈 행은 건너뛰고 다음 학생 찾기
-            }
-            
-            // 유효한 학생 데이터를 찾았으면 연속 빈 행 카운터 리셋
-            consecutiveEmptyRows = 0;
-            
+
             console.log(`학생 발견: 행 ${i + 1}, 번호: ${scoreRow[0]}, 이름: ${scoreRow[1] || '미기입'}`);
-            
-            const student = {
-                number: scoreRow[0],
-                name: scoreRow[1] || `학생${scoreRow[0]}`, // B열에서 학생 이름 추출
-                scores: {},
-                achievements: {},
-                grades: {},
-                ranks: {},
-                subjectTotals: {},
-                percentiles: {},
-                sourceFormat: fileData.format,
-                hasGradeReportSource: fileData.format === 'grade-report',
-                hasXlsDataSource: fileData.format !== 'grade-report',
-                totalStudents: null
-            };
+
+            // 같은 번호의 학생이 이미 있으면(과목 분할 페이지) 병합
+            let student = fileData.students.find(s => String(s.number) === String(scoreRow[0]));
+            if (!student) {
+                student = {
+                    number: scoreRow[0],
+                    name: scoreRow[1] || `학생${scoreRow[0]}`, // B열에서 학생 이름 추출
+                    scores: {},
+                    achievements: {},
+                    grades: {},
+                    ranks: {},
+                    subjectTotals: {},
+                    percentiles: {},
+                    sourceFormat: fileData.format,
+                    hasGradeReportSource: fileData.format === 'grade-report',
+                    hasXlsDataSource: fileData.format !== 'grade-report',
+                    totalStudents: null
+                };
+                fileData.students.push(student);
+            } else if (scoreRow[1] && student.name === `학생${student.number}`) {
+                student.name = scoreRow[1];
+            }
 
             // 각 과목별 데이터 추출
-            fileData.subjects.forEach(subject => {
+            parseSubjects.forEach(subject => {
                 const colIndex = subject.columnIndex;
                 
                 // 점수 (원점수 추출)
@@ -1597,16 +1654,12 @@ class ScoreAnalyzer {
                 }
             });
 
-            // 가중평균등급 계산
+            // 가중평균등급 계산 (parseFileData에서 전체 과목 기준으로 재계산됨)
             student.weightedAverageGrade = this.calculateWeightedAverageGrade(student, fileData.subjects);
-            
-            // 9등급 환산 평균 계산
             student.weightedAverage9Grade = this.calculateWeightedAverage9Grade(student, fileData.subjects);
-            
-            fileData.students.push(student);
+
+            i += 5; // 다음 학생 블록으로
         }
-        
-        console.log(`총 ${fileData.students.length}명의 학생 데이터를 파싱했습니다.`);
     }
 
     calculateWeightedAverageGrade(student, subjects) {
